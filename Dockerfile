@@ -9,7 +9,7 @@ ENV     POETRY_VIRTUALENVS_CREATE=false
 
 RUN     apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg gcc make automake ca-certificates autoconf musl-dev coreutils libffi-dev zlib-dev && \
     mkdir -p /usr/local/src/ /var/lib/tor/ && \
-    git clone https://git.torproject.org/tor.git /usr/local/src/tor && \
+    git clone https://gitlab.torproject.org/tpo/core/tor.git /usr/local/src/tor && \
     cd /usr/local/src/tor && \
     TOR_VERSION=${tor_version=$(git tag | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)} && \
     git checkout tor-$TOR_VERSION && \
@@ -26,7 +26,7 @@ RUN     apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg g
     apk add --no-cache libevent openssl
 
 RUN    apk add --no-cache git gcc make automake autoconf musl-dev libtool && \
-    git clone https://git.torproject.org/torsocks.git /usr/local/src/torsocks && \
+    git clone https://gitlab.torproject.org/tpo/core/torsocks.git /usr/local/src/torsocks && \
     cd /usr/local/src/torsocks && \
     TORSOCKS_VERSION=${torsocks_version=$(git tag | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)} && \
     git checkout $TORSOCKS_VERSION && \
