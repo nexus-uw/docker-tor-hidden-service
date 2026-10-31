@@ -42,13 +42,13 @@ RUN     mkdir -p /etc/tor/
 COPY    pyproject.toml /usr/local/src/onions/
 
 RUN     cd /usr/local/src/onions && apk add --no-cache openssl-dev libffi-dev gcc libc-dev && \
-    poetry install --no-dev --no-root && \
+    poetry install --without dev --no-root && \
     apk del libffi-dev gcc libc-dev openssl-dev
 
 COPY    onions /usr/local/src/onions/onions
 COPY    poetry.lock /usr/local/src/onions/
 RUN     cd /usr/local/src/onions && apk add --no-cache gcc libc-dev && \
-    poetry install --no-dev && \
+    poetry install --without dev && \
     apk del gcc libc-dev
 
 RUN     mkdir -p ${HOME}/.tor && \
