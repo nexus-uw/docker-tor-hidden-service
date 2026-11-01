@@ -1,0 +1,581 @@
+#!/usr/bin/env bash
+# onions: configure tor onion services from environment variables and display
+# the onion addresses of the configured services.
+#
+#   onions                 display configured onion services
+#   onions --json          same, as JSON
+#   onions --setup-hosts   write keys and torrc from the environment
+#                          (onion addresses are known once tor has started)
+#
+# Key generation and onion address computation are delegated to tor itself:
+# when a hidden service directory only contains hs_ed25519_secret_key (or
+# nothing at all), tor derives (or generates) the keypair and writes the
+# hostname file on startup.
+set -uo pipefail
+
+HIDDEN_SERVICE_DIR=${HIDDEN_SERVICE_DIR:-/var/lib/tor/hidden_service}
+HIDDEN_SERVICE_DIR=${HIDDEN_SERVICE_DIR%/}
+DATA_DIRECTORY=${TOR_DATA_DIRECTORY:-/run/tor/data}
+TORRC=${ONIONS_TORRC:-/etc/tor/torrc}
+SECRETS_DIR=${ONIONS_SECRETS_DIR:-/run/secrets}
+HOSTS_FILE=${ONIONS_HOSTS_FILE:-/etc/hosts}
+TOR_BIN=${ONIONS_TOR_BIN:-tor}
+DEFAULT_CONTROL_PORT=9051
+KEY_HEADER='== ed25519v1-secret: type0 =='
+KEY_SIZE=96
+
+GROUP_ORDER=()
+declare -A GROUP_HOSTS=()   # group -> space separated hosts
+declare -A GROUP_KEY=()     # group -> path of the secret key file to install
+declare -A SERVICE_PORTS=() # "group|host" -> space separated "from:dest"
+WORKDIR=
+
+log_error() { printf 'onions: ERROR: %s\n' "$*" >&2; }
+log_warning() { printf 'onions: WARNING: %s\n' "$*" >&2; }
+
+usage() {
+    cat <<EOF
+usage: onions [-h] [--json] [--setup-hosts]
+
+Display onion sites
+
+options:
+  -h, --help     show this help message and exit
+  --json         serialize to json
+  --setup-hosts  Setup hosts
+EOF
+}
+
+env_to_bool() {
+    local value=${!1:-$2}
+    case ${value,,} in
+        y | yes | t | true | on | 1) return 0 ;;
+        n | no | f | false | off | 0) return 1 ;;
+        *)
+            log_error "invalid boolean value '$value' for $1"
+            return 1
+            ;;
+    esac
+}
+
+trim() {
+    local s=$1
+    s=${s#"${s%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    printf '%s' "$s"
+}
+
+# --- service groups ---------------------------------------------------------
+
+group_exists() { [[ -v "GROUP_HOSTS[$1]" ]]; }
+
+group_dir() { printf '%s/%s' "$HIDDEN_SERVICE_DIR" "$1"; }
+
+add_group() {
+    local name=$1
+    group_exists "$name" && return 0
+    if [[ ! $name =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "Group $name has invalid name"
+        return 1
+    fi
+    GROUP_ORDER+=("$name")
+    GROUP_HOSTS[$name]=""
+}
+
+group_of_host() {
+    local group host
+    for group in "${GROUP_ORDER[@]}"; do
+        for host in ${GROUP_HOSTS[$group]}; do
+            if [[ $host == "$1" ]]; then
+                printf '%s' "$group"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+valid_host() {
+    if [[ ! $1 =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        log_error "Invalid host name '$1'"
+        return 1
+    fi
+}
+
+add_service() {
+    local group=$1 host=$2 h
+    valid_host "$host" || return 1
+    for h in ${GROUP_HOSTS[$group]}; do
+        [[ $h == "$host" ]] && return 0
+    done
+    GROUP_HOSTS[$group]+="${GROUP_HOSTS[$group]:+ }$host"
+}
+
+# Set HOST_GROUP to the group owning host, creating a group named after the
+# host when the host is not part of any group yet.
+HOST_GROUP=
+ensure_host_group() {
+    local host=$1
+    valid_host "$host" || return 1
+    if HOST_GROUP=$(group_of_host "$host"); then
+        return 0
+    fi
+    add_group "$host" && add_service "$host" "$host" || return 1
+    HOST_GROUP=$host
+}
+
+# add_ports GROUP HOST "from:dest[,from:dest...]"
+add_ports() {
+    local group=$1 host=$2 csv=$3 entry from dest
+    local -a entries parsed=()
+    csv=${csv//[$'\r\n']/}
+    IFS=, read -r -a entries <<<"$csv"
+    for entry in "${entries[@]}"; do
+        entry=$(trim "$entry")
+        [[ -z $entry ]] && continue
+        if [[ $entry != *:* ]]; then
+            log_error "Invalid port mapping '$entry'"
+            return 1
+        fi
+        from=$(trim "${entry%%:*}")
+        dest=$(trim "${entry#*:}")
+        if [[ ! $from =~ ^[0-9]+$ ]]; then
+            log_error "Invalid port '$from' in '$entry'"
+            return 1
+        fi
+        if [[ $dest == unix:* ]]; then
+            if [[ $dest =~ [[:space:]] ]]; then
+                log_error "Invalid socket path in '$entry'"
+                return 1
+            fi
+        elif [[ $dest =~ ^[0-9]+$ ]]; then
+            dest=$((10#$dest))
+        else
+            log_error "Invalid port '$dest' in '$entry'"
+            return 1
+        fi
+        parsed+=("$((10#$from)):$dest")
+    done
+    local key="$group|$host"
+    for entry in "${parsed[@]}"; do
+        SERVICE_PORTS[$key]+="${SERVICE_PORTS[$key]:+ }$entry"
+    done
+}
+
+# --- keys -------------------------------------------------------------------
+
+validate_key_file() {
+    local file=$1 size header
+    size=$(wc -c <"$file") || return 1
+    header=$(head -c ${#KEY_HEADER} "$file") || return 1
+    if [[ $header != "$KEY_HEADER" ]]; then
+        log_error "Private key does not seem to be a valid ed25519 tor key"
+        return 1
+    fi
+    if ((size != KEY_SIZE)); then
+        log_error "Private key does not seem to have the right length"
+        return 1
+    fi
+}
+
+# set_group_key GROUP BASE64_KEY
+set_group_key() {
+    local group=$1 file
+    add_group "$group" || return 1
+    file="$WORKDIR/$group.key"
+    if ! printf '%s' "$2" | tr -d ' \t\r\n' | base64 -d >"$file" 2>/dev/null; then
+        log_error "Private key is not valid base64"
+        return 1
+    fi
+    validate_key_file "$file" || return 1
+    [[ -n ${GROUP_KEY[$group]:-} ]] && log_warning 'Secret key already set, overriding'
+    GROUP_KEY[$group]=$file
+}
+
+# Key precedence: environment > key already on disk > docker secret.
+# Without any key, tor generates a new one on startup.
+resolve_key() {
+    local group=$1 secret
+    [[ -n ${GROUP_KEY[$group]:-} ]] && return 0
+    [[ -f "$(group_dir "$group")/hs_ed25519_secret_key" ]] && return 0
+    secret="$SECRETS_DIR/$group"
+    [[ -f $secret ]] || return 0
+    if validate_key_file "$secret"; then
+        GROUP_KEY[$group]=$secret
+    else
+        log_warning "Fail to load key from secret $secret," \
+            "check the key or secret name collision"
+    fi
+}
+
+# --- environment handlers ---------------------------------------------------
+
+# {HOST}_SERVICE_NAME=group
+set_service_name() {
+    add_group "$2" && add_service "$2" "$1"
+}
+
+# {HOST}_PORTS=from:dest,...
+set_ports() {
+    ensure_host_group "$1" && add_ports "$HOST_GROUP" "$1" "$2"
+}
+
+# {HOST}_KEY=base64 key (deprecated)
+set_host_key() {
+    ensure_host_group "$1" && set_group_key "$HOST_GROUP" "$2"
+}
+
+# {GROUP}_TOR_SERVICE_VERSION=3
+set_group_version() {
+    if [[ ! $2 =~ ^[0-9]+$ ]] || ((10#$2 != 3)); then
+        log_error "Url version $2 is not supported"
+        return 1
+    fi
+    add_group "$1"
+}
+
+# {GROUP}_TOR_SERVICE_HOSTS=from:host:dest,from:unix:/path,...
+set_group_hosts() {
+    local group=$1 csv=$2 entry from host dest
+    local -a entries
+    add_group "$group" || return 1
+    csv=${csv//[$'\r\n']/}
+    IFS=, read -r -a entries <<<"$csv"
+    for entry in "${entries[@]}"; do
+        entry=$(trim "$entry")
+        [[ -z $entry ]] && continue
+        if [[ ! $entry =~ ^([^:]+):([^:]+):(.+)$ ]]; then
+            log_error "Invalid service host mapping '$entry'"
+            return 1
+        fi
+        from=${BASH_REMATCH[1]} host=${BASH_REMATCH[2]} dest=${BASH_REMATCH[3]}
+        if [[ $host == unix && $dest == /* ]]; then
+            add_service "$group" "$group" &&
+                add_ports "$group" "$group" "$from:unix:$dest" || return 1
+        else
+            add_service "$group" "$host" &&
+                add_ports "$group" "$host" "$from:$dest" || return 1
+        fi
+    done
+}
+
+apply_env_rule() {
+    local regex=$1 handler=$2 name
+    for name in $(compgen -e); do
+        # Ignore GPG_KEY env variable to avoid warning (deprecated setup)
+        [[ $name == GPG_KEY ]] && continue
+        if [[ $name =~ $regex ]]; then
+            "$handler" "${BASH_REMATCH[1],,}" "${!name}" ||
+                log_error "Fail to setup from $name environment"
+        fi
+    done
+}
+
+setup_from_env() {
+    apply_env_rule '^([A-Z0-9]+)_SERVICE_NAME$' set_service_name
+    apply_env_rule '^([A-Z0-9]+)_PORTS$' set_ports
+    apply_env_rule '^([A-Z0-9]+)_KEY$' set_host_key
+    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_VERSION$' set_group_version
+    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_KEY$' set_group_key
+    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_HOSTS$' set_group_hosts
+}
+
+# Legacy docker links (--link): linked containers are listed in /etc/hosts
+# and expose {ALIAS}_NAME and {ALIAS}_PORT_{port}_TCP environment variables.
+setup_from_links() {
+    [[ -r $HOSTS_FILE ]] || return 0
+    local ip first rest env_name name upper best port var
+    local -a ips=()
+    declare -A names=() link_env=()
+    while read -r ip first rest; do
+        [[ -z $ip || $ip == \#* || -z $rest ]] && continue
+        if [[ -v "names[$ip]" ]]; then
+            names[$ip]+=" $first $rest"
+            continue
+        fi
+        env_name=${first^^}
+        env_name=${env_name//-/_}
+        [[ $env_name =~ ^[A-Z0-9_]+$ ]] || continue
+        if [[ -v "${env_name}_NAME" ]]; then
+            ips+=("$ip")
+            names[$ip]="$first $rest"
+            link_env[$ip]=$env_name
+        fi
+    done <"$HOSTS_FILE"
+
+    for ip in "${ips[@]}"; do
+        # Use the shortest name matching some environment variable
+        best=
+        for name in ${names[$ip]}; do
+            upper=${name^^}
+            upper=${upper//-/_}
+            [[ -n $(compgen -e -- "$upper") ]] || continue
+            if [[ -z $best ]] || ((${#name} < ${#best})); then
+                best=$name
+            fi
+        done
+        [[ -z $best ]] && continue
+        ensure_host_group "$best" || continue
+        for var in $(compgen -e -- "${link_env[$ip]}_PORT_"); do
+            [[ $var =~ ^${link_env[$ip]}_PORT_([0-9]+)_TCP$ ]] || continue
+            port=${BASH_REMATCH[1]}
+            add_ports "$HOST_GROUP" "$best" "${PORT_MAP:-$port}:$port" ||
+                log_error "Fail to setup ports from docker link $var"
+        done
+    done
+}
+
+# Drop invalid groups
+check_services() {
+    local group host port err
+    local -a valid=() hosts ports
+    for group in "${GROUP_ORDER[@]}"; do
+        err=
+        read -r -a hosts <<<"${GROUP_HOSTS[$group]}"
+        declare -A seen=()
+        if ((${#hosts[@]} == 0)); then
+            err="Service group $group has no service"
+        fi
+        for host in "${hosts[@]}"; do
+            read -r -a ports <<<"${SERVICE_PORTS[$group|$host]:-}"
+            if ((${#ports[@]} == 0)); then
+                err="Service $host has not ports set"
+                break
+            fi
+            for port in "${ports[@]}"; do
+                if ((${#hosts[@]} > 1)) && [[ ${port#*:} == unix:* ]]; then
+                    err="Cannot use socket and ports in the same $host"
+                    break 2
+                fi
+                if [[ -v "seen[${port%%:*}]" ]]; then
+                    err="Same port for multiple services in $group group"
+                    break 2
+                fi
+                seen[${port%%:*}]=1
+            done
+        done
+        unset seen
+        if [[ -n $err ]]; then
+            log_error "$err"
+        else
+            valid+=("$group")
+        fi
+    done
+    GROUP_ORDER=("${valid[@]}")
+}
+
+# --- torrc ------------------------------------------------------------------
+
+is_ipv4() {
+    local IFS=. octet
+    local -a octets
+    [[ $1 =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+    read -r -a octets <<<"$1"
+    for octet in "${octets[@]}"; do
+        ((10#$octet <= 255)) || return 1
+    done
+}
+
+render_control_port() {
+    [[ -v TOR_CONTROL_PORT ]] || return 0
+    local spec=$TOR_CONTROL_PORT host port=$DEFAULT_CONTROL_PORT family=4 hashed
+    if [[ $spec == unix:* ]]; then
+        printf 'ControlPort %s\n' "$spec"
+    else
+        if [[ $spec =~ ^\[([0-9A-Fa-f:.]+)\](:([0-9]+))?$ ]]; then
+            host=${BASH_REMATCH[1]} port=${BASH_REMATCH[3]:-$port} family=6
+        elif [[ $spec == *:*:* ]]; then
+            host=$spec family=6
+        elif [[ $spec == *:* ]]; then
+            host=${spec%:*} port=${spec##*:}
+        else
+            host=$spec
+        fi
+        if [[ $family == 4 ]] && ! is_ipv4 "$host" ||
+            [[ $family == 6 && ! $host =~ ^[0-9A-Fa-f:.]+$ ]] ||
+            [[ ! $port =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65535)); then
+            log_error "TOR_CONTROL_PORT environment variable error:" \
+                "expected ip, ip:port, [ipv6]:port or unix:/path, got '$spec'"
+            return 1
+        fi
+        if [[ $family == 4 ]]; then
+            printf 'ControlPort %s:%d\n' "$host" "$((10#$port))"
+        else
+            printf 'ControlPort [%s]:%d\n' "$host" "$((10#$port))"
+        fi
+    fi
+    if [[ -n ${TOR_CONTROL_PASSWORD:-} ]]; then
+        if ! hashed=$(HOME=/tmp "$TOR_BIN" --quiet --hash-password "$TOR_CONTROL_PASSWORD"); then
+            log_error "Fail to hash control port password"
+            return 1
+        fi
+        printf 'HashedControlPassword %s\n' "$(trim "$hashed")"
+    fi
+}
+
+render_torrc() {
+    local group host port from dest
+    local -a ports
+    for group in "${GROUP_ORDER[@]}"; do
+        printf 'HiddenServiceDir %s\n' "$(group_dir "$group")"
+        printf 'HiddenServiceVersion 3\n'
+        for host in ${GROUP_HOSTS[$group]}; do
+            read -r -a ports <<<"${SERVICE_PORTS[$group|$host]:-}"
+            for port in "${ports[@]}"; do
+                from=${port%%:*} dest=${port#*:}
+                if [[ $dest == unix:* ]]; then
+                    printf 'HiddenServicePort %s %s\n' "$from" "$dest"
+                else
+                    printf 'HiddenServicePort %s %s:%s\n' "$from" "$host" "$dest"
+                fi
+            done
+        done
+        printf '\n'
+    done
+    printf 'DataDirectory %s\n' "$DATA_DIRECTORY"
+    if [[ -v TOR_SOCKS_PORT ]]; then
+        printf 'SocksPort %s\n' "$TOR_SOCKS_PORT"
+    else
+        printf 'SocksPort 0\n'
+    fi
+    if env_to_bool TOR_EXIT_RELAY false 2>/dev/null; then
+        printf 'ExitRelay 1\n'
+    else
+        printf 'ExitRelay 0\n'
+    fi
+    render_control_port || return 1
+    if [[ -v TOR_EXTRA_OPTIONS ]]; then
+        printf '\n%s\n' "$TOR_EXTRA_OPTIONS"
+    fi
+}
+
+write_group() {
+    local group=$1 dir key=${GROUP_KEY[$1]:-}
+    dir=$(group_dir "$group")
+    mkdir -p "$dir" && chmod 700 "$dir" || return 1
+    [[ -z $key ]] && return 0
+    # tor derives the public key and hostname from the secret key on startup
+    rm -f "$dir/hostname" "$dir/hs_ed25519_public_key"
+    cp "$key" "$dir/hs_ed25519_secret_key" &&
+        chmod 600 "$dir/hs_ed25519_secret_key"
+}
+
+setup_hosts() {
+    local group torrc
+    WORKDIR=$(mktemp -d) || return 1
+    # shellcheck disable=SC2064
+    trap "rm -rf '$WORKDIR'" EXIT
+
+    setup_from_env
+    setup_from_links
+    check_services
+
+    if env_to_bool TOR_ENABLE_VANGUARDS false 2>/dev/null; then
+        log_warning "TOR_ENABLE_VANGUARDS is not supported anymore (vanguards" \
+            "is a python tool); tor >= 0.4.7 ships vanguards-lite by default"
+    fi
+
+    for group in "${GROUP_ORDER[@]}"; do
+        resolve_key "$group"
+    done
+    torrc=$(render_torrc) || return 1
+    for group in "${GROUP_ORDER[@]}"; do
+        write_group "$group" || {
+            log_error "Fail to write keys for $group"
+            return 1
+        }
+    done
+    mkdir -p "$(dirname "$TORRC")" &&
+        printf '%s\n' "$torrc" >"$TORRC.tmp" &&
+        mv "$TORRC.tmp" "$TORRC"
+}
+
+# --- display ----------------------------------------------------------------
+
+show() {
+    local json=$1 keyword arg1 _rest group onion url sep first=1
+    local -a order=() urls
+    declare -A dirs=() ports=()
+    if [[ -r $TORRC ]]; then
+        while read -r keyword arg1 _rest; do
+            case $keyword in
+                HiddenServiceDir)
+                    group=$(basename "$arg1")
+                    order+=("$group")
+                    dirs[$group]=$arg1
+                    ports[$group]=""
+                    ;;
+                HiddenServicePort)
+                    [[ -n ${group:-} ]] && ports[$group]+=" $arg1"
+                    ;;
+            esac
+        done <"$TORRC"
+    fi
+
+    if ((${#order[@]} == 0)); then
+        if [[ $json == 1 ]]; then echo '{}'; else echo 'No onion site'; fi
+        return 0
+    fi
+
+    [[ $json == 1 ]] && printf '{'
+    for group in "${order[@]}"; do
+        onion=$(cat "${dirs[$group]}/hostname" 2>/dev/null)
+        onion=$(trim "$onion")
+        urls=()
+        if [[ -n $onion ]]; then
+            for url in ${ports[$group]}; do
+                urls+=("$onion:$url")
+            done
+        fi
+        if [[ $json == 1 ]]; then
+            ((first)) || printf ', '
+            first=0
+            printf '"%s": [' "$group"
+            sep=
+            for url in "${urls[@]}"; do
+                printf '%s"%s"' "$sep" "$url"
+                sep=', '
+            done
+            printf ']'
+        elif [[ -z $onion ]]; then
+            printf '%s: onion address not generated yet (is tor running?)\n' "$group"
+        else
+            printf '%s: ' "$group"
+            sep=
+            for url in "${urls[@]}"; do
+                printf '%s%s' "$sep" "$url"
+                sep=', '
+            done
+            printf '\n'
+        fi
+    done
+    [[ $json == 1 ]] && printf '}\n'
+    return 0
+}
+
+main() {
+    local json=0 setup=0
+    while (($#)); do
+        case $1 in
+            --json) json=1 ;;
+            --setup-hosts) setup=1 ;;
+            -h | --help)
+                usage
+                return 0
+                ;;
+            *)
+                usage >&2
+                log_error "unrecognized argument: $1"
+                return 2
+                ;;
+        esac
+        shift
+    done
+    if ((setup)); then
+        setup_hosts
+        return
+    fi
+    show "$json"
+}
+
+main "$@"

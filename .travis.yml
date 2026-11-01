@@ -1,9 +1,0 @@
-sudo: false
-dist: xenial
-language: python
-python:
-- '3.8'
-install: pip install tox-travis pre-commit poetry
-script:
-- pre-commit run --all-files
-- tox

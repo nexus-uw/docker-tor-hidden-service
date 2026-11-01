@@ -1,0 +1,4541 @@
+diff --git a/.dockerignore b/.dockerignore
+index 9beb8f9..4b95f10 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -1,6 +1,3 @@
++.git
+ keys/
+-*.egg-info
+-.tox/
+-__cache__
+-__pycache__
+-*/__pycache__
+\ No newline at end of file
++tests/
+diff --git a/.gitignore b/.gitignore
+index 8540dfb..eb7699e 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,108 +1,3 @@
+-
+-# Created by https://www.gitignore.io/api/python
+-
+-### Python ###
+-# Byte-compiled / optimized / DLL files
+-__pycache__/
+-*.py[cod]
+-*$py.class
+-
+-# C extensions
+-*.so
+-
+-# Distribution / packaging
+-.Python
+-env/
+-build/
+-develop-eggs/
+-dist/
+-downloads/
+-eggs/
+-.eggs/
+-lib/
+-lib64/
+-parts/
+-sdist/
+-var/
+-wheels/
+-*.egg-info/
+-.installed.cfg
+-*.egg
+-
+-# PyInstaller
+-#  Usually these files are written by a python script from a template
+-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+-*.manifest
+-*.spec
+-
+-# Installer logs
+-pip-log.txt
+-pip-delete-this-directory.txt
+-
+-# Unit test / coverage reports
+-htmlcov/
+-.tox/
+-.coverage
+-.coverage.*
+-.cache
+-nosetests.xml
+-coverage.xml
+-*,cover
+-.hypothesis/
+-
+-# Translations
+-*.mo
+-*.pot
+-
+-# Django stuff:
++keys/
+ *.log
+-local_settings.py
+-
+-# Flask stuff:
+-instance/
+-.webassets-cache
+-
+-# Scrapy stuff:
+-.scrapy
+-
+-# Sphinx documentation
+-docs/_build/
+-
+-# PyBuilder
+-target/
+-
+-# Jupyter Notebook
+-.ipynb_checkpoints
+-
+-# pyenv
+-.python-version
+-
+-# celery beat schedule file
+-celerybeat-schedule
+-
+-# SageMath parsed files
+-*.sage.py
+-
+-# dotenv
+ .env
+-
+-# virtualenv
+-.venv
+-venv/
+-ENV/
+-
+-# Spyder project settings
+-.spyderproject
+-.spyproject
+-
+-# Rope project settings
+-.ropeproject
+-
+-# mkdocs documentation
+-/site
+-
+-# End of https://www.gitignore.io/api/python
+-
+-# more
+-key/
+-.vscode
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+deleted file mode 100644
+index 8704334..0000000
+--- a/.pre-commit-config.yaml
++++ /dev/null
+@@ -1,24 +0,0 @@
+-repos:
+--   repo: git://github.com/pre-commit/pre-commit-hooks
+-    rev: v2.5.0
+-    hooks:
+-    -   id: check-added-large-files
+-    -   id: check-docstring-first
+-    -   id: check-merge-conflict
+-    -   id: check-yaml
+-    -   id: end-of-file-fixer
+-    -   id: flake8
+-        args:
+-            - --exclude=__init__.py
+-        language_version: python3
+-    -   id: requirements-txt-fixer
+-    -   id: trailing-whitespace
+--   repo: https://github.com/pre-commit/mirrors-autopep8
+-    rev: v1.5.2
+-    hooks:
+-    -   id: autopep8
+--   repo: git://github.com/asottile/reorder_python_imports
+-    rev: v2.3.0
+-    hooks:
+-    -   id: reorder-python-imports
+-        language_version: python3
+diff --git a/.travis.yml b/.travis.yml
+index 7b4b9af..4d7a16b 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -1,9 +1,9 @@
+-sudo: false
+-dist: xenial
+-language: python
+-python:
+-- '3.8'
+-install: pip install tox-travis pre-commit poetry
++dist: jammy
++language: shell
++addons:
++  apt:
++    packages:
++      - shellcheck
+ script:
+-- pre-commit run --all-files
+-- tox
++  - make check
++  - make test
+diff --git a/Dockerfile b/Dockerfile
+index 54f0ef5..87c05c0 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,13 +1,12 @@
+-FROM    python:3.10-alpine
++FROM    alpine:3.20
+
+ # if omitted, the versions are determined from the git tags
+ ARG     tor_version
+ ARG     torsocks_version
+
+ ENV     HOME /var/lib/tor
+-ENV     POETRY_VIRTUALENVS_CREATE=false
+
+-RUN     apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg gcc make automake ca-certificates autoconf musl-dev coreutils libffi-dev zlib-dev && \
++RUN     apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg gcc make automake ca-certificates autoconf musl-dev coreutils zlib-dev && \
+     mkdir -p /usr/local/src/ /var/lib/tor/ && \
+     git clone https://gitlab.torproject.org/tpo/core/tor.git /usr/local/src/tor && \
+     cd /usr/local/src/tor && \
+@@ -21,9 +20,8 @@ RUN     apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg g
+     make && make install && \
+     cd .. && \
+     rm -rf tor && \
+-    pip3 install --upgrade pip poetry && \
+-    apk del git libevent-dev openssl-dev gnupg cargo make automake autoconf musl-dev coreutils libffi-dev && \
+-    apk add --no-cache libevent openssl
++    apk del git libevent-dev openssl-dev gnupg cargo make automake autoconf musl-dev coreutils && \
++    apk add --no-cache libevent openssl zlib bash su-exec
+
+ RUN    apk add --no-cache git gcc make automake autoconf musl-dev libtool && \
+     git clone https://gitlab.torproject.org/tpo/core/torsocks.git /usr/local/src/torsocks && \
+@@ -39,30 +37,14 @@ RUN    apk add --no-cache git gcc make automake autoconf musl-dev libtool && \
+
+ RUN     mkdir -p /etc/tor/
+
+-COPY    pyproject.toml /usr/local/src/onions/
+-
+-RUN     cd /usr/local/src/onions && apk add --no-cache openssl-dev libffi-dev gcc libc-dev && \
+-    poetry install --without dev --no-root && \
+-    apk del libffi-dev gcc libc-dev openssl-dev
+-
+-COPY    onions /usr/local/src/onions/onions
+-COPY    poetry.lock /usr/local/src/onions/
+-RUN     cd /usr/local/src/onions && apk add --no-cache gcc libc-dev && \
+-    poetry install --without dev && \
+-    apk del gcc libc-dev
++COPY    bin/onions bin/docker-entrypoint /usr/local/bin/
+
+ RUN     mkdir -p ${HOME}/.tor && \
+     addgroup -S -g 107 tor && \
+     adduser -S -G tor -u 104 -H -h ${HOME} tor
+
+-COPY    assets/entrypoint-config.yml /
+-COPY    assets/torrc /var/local/tor/torrc.tpl
+-COPY    assets/vanguards.conf.tpl /var/local/tor/vanguards.conf.tpl
+-
+-ENV     VANGUARDS_CONFIG /etc/tor/vanguards.conf
+-
+ VOLUME  ["/var/lib/tor/hidden_service/"]
+
+-ENTRYPOINT ["pyentrypoint"]
++ENTRYPOINT ["docker-entrypoint"]
+
+ CMD     ["tor"]
+diff --git a/Makefile b/Makefile
+index da803a3..4ed74b9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -8,7 +8,7 @@ CUR_COMMIT = $(shell git rev-parse --short HEAD)
+ CUR_TAG = v$(TOR_VERSION)-$(CUR_COMMIT)
+
+ test:
+-	tox
++	bash tests/onions_test.sh
+
+ tag:
+ 	git tag $(CUR_TAG)
+@@ -21,7 +21,7 @@ release: test tag
+ 	git push origin --tags
+
+ check:
+-	pre-commit run --all-files
++	shellcheck bin/onions bin/docker-entrypoint tests/onions_test.sh
+
+ build:
+ 	- echo build with tor version $(TOR_VERSION) and torsocks version $(TORSOCKS_VERSION)
+@@ -48,12 +48,6 @@ shell-v3: build
+ run-v3-latest:
+ 	docker-compose -f docker-compose.v3.latest.yml up --force-recreate
+
+-run-vanguards: build
+-	docker-compose -f docker-compose.vanguards.yml up --force-recreate
+-
+-run-vanguards-network: build
+-	docker-compose -f docker-compose.vanguards-network.yml up --force-recreate
+-
+ publish: build
+ 	docker tag goldy/tor-hidden-service:$(CUR_TAG) goldy/tor-hidden-service:latest
+ 	docker push goldy/tor-hidden-service:$(CUR_TAG)
+diff --git a/README.md b/README.md
+index 2b1ad23..34f44ff 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,13 @@
+
+ ## Changelog
+
++* Unreleased
++  * Remove python: the `onions` tool and the container entrypoint are now bash scripts
++    (`bin/onions`, `bin/docker-entrypoint`); `pyentrypoint` and `pytor` are not used anymore
++  * Keys are now generated by `tor` itself on first start, onion addresses are displayed once `tor` wrote them
++  * Drop `vanguards` support (python only tool), `tor` ships vanguards-lite by default since `0.4.7`
++  * An invalid `TOR_CONTROL_PORT` now stops the container instead of falling back to `0.0.0.0`
++
+ * 26 jul 2022
+   * Update `onions` tool to v0.7.1:
+     * Fix an issue when restarting a container with control port enabled
+@@ -120,6 +127,7 @@ Secret key can be set through docker `secrets`, see `docker-compose.v3.yml` for
+ ### Tools
+
+ A command line tool `onions` is available in container to get `.onion` url when container is running.
++Onion addresses are also printed in container logs once `tor` has started.
+
+ ```sh
+ # Get services
+@@ -142,55 +150,23 @@ To disable this behavior, add `ENTRYPOINT_DISABLE_RELOAD` in environment.
+
+ Container version will follow tor release versions.
+
+-### pyentrypoint
+-
+-This container uses [`pyentrypoint`](https://github.com/cmehay/pyentrypoint) to generate its setup.
++### Entrypoint
+
+-### pytor
++The container setup is done by [`bin/docker-entrypoint`](bin/docker-entrypoint) and [`bin/onions`](bin/onions) (bash).
++Keys and `.onion` hostnames are generated by `tor` itself when the hidden service directory has no key.
+
+-This containner uses [`pytor`](https://github.com/cmehay/pytor) to mannages tor cryptography, generate keys and compute onion urls.
++Run the tests with `make test` (requires bash >= 4.4).
+
+ ## Control port
+
+ Use these environment variables to enable control port
+-* `TOR_CONTROL_PORT`: enable and set control port binding (`ip`, `ip:port` or `unix:/path/to/socket.sock`) (default port is 9051)
++* `TOR_CONTROL_PORT`: enable and set control port binding (`ip`, `ip:port`, `[ipv6]:port` or `unix:/path/to/socket.sock`) (default port is 9051)
+ * `TOR_CONTROL_PASSWORD`: set control port password (in clear, not hashed)
+ * `TOR_DATA_DIRECTORY`: set data directory (default `/run/tor/data`)
+
+ ## Vanguards
+
+-For critical hidden services, it's possible to increase security with [`Vanguards`](https://github.com/mikeperry-tor/vanguards) tool.
+-
+-
+-### Run in the same container
+-
+-Check out [`docker-compose.vanguards.yml`](docker-compose.vanguards.yml) for example.
+-
+-Add environment variable `TOR_ENABLE_VANGUARDS` to `true` to start `vanguards` daemon beside `tor` process. `Vanguards` logs will be displayed to stdout using `pyentrypoint` logging, if you need raw output, set `ENTRYPOINT_RAW` to `true` in environment.
+-
+-In this mode, if `vanguards` exits, sigint is sent to `tor` process to terminate it. If you want to disable this behavior, set `VANGUARD_KILL_TOR_ON_EXIT` to `false` in environment.
+-
+-### Run in separate containers
+-Check out[`docker-compose.vanguards-network.yml`](docker-compose.vanguards-network.yml) for an example of increased security setup using docker networks.
+-
+-#### settings
+-
+-Use the same environment variable as `tor` to configure `vangards` (see upper).
+-* `TOR_CONTROL_PORT`
+-* `TOR_CONTROL_PASSWORD`
+-
+-##### more settings
+-
+-Use `VANGUARDS_EXTRA_OPTIONS` environment variable to change any settings.
+-
+-The following settings cannot me changer with this variable:
+- - `control_ip`:
+-   - use `TOR_CONTROL_PORT`
+- - `control_port`:
+-   - use `TOR_CONTROL_PORT`
+- - `control_socket`:
+-   - use `TOR_CONTROL_PORT`
+- - `control_pass`:
+-   - use `TOR_CONTROL_PASSWORD`
+- - `state_file`:
+-   - use `VANGUARDS_STATE_FILE`
++The [`Vanguards`](https://github.com/mikeperry-tor/vanguards) add-on is not bundled anymore as it is a python tool.
++Since `0.4.7`, `tor` enables [vanguards-lite](https://spec.torproject.org/proposals/333-vanguards-lite.html) by default for onion services.
++If you need full vanguards, run it from a separate image, connected to this container control port
++(see `TOR_CONTROL_PORT` and `TOR_CONTROL_PASSWORD`).
+diff --git a/assets/entrypoint-config.yml b/assets/entrypoint-config.yml
+deleted file mode 100644
+index 8ddcb1a..0000000
+--- a/assets/entrypoint-config.yml
++++ /dev/null
+@@ -1,41 +0,0 @@
+-commands:
+-    - tor
+-    - vanguards
+-
+-user: tor
+-group: tor
+-
+-secret_env:
+-    - '*_KEY'
+-    - '*_PORTS'
+-    - '*_SERVICE_NAME'
+-    - '*_TOR_SERVICE_*'
+-    - 'TOR_SOCKS_PORT'
+-    - TOR_CONTROL_PASSWORD
+-
+-config_files:
+-    - vanguards:
+-        - /var/local/tor/vanguards.conf.tpl: /etc/tor/vanguards.conf
+-
+-pre_conf_commands:
+-    - tor:
+-        - onions --setup-hosts
+-
+-post_conf_commands:
+-    - tor:
+-        - mkdir -p /run/tor
+-        - chmod -R 700 $HOME /run/tor
+-        - chown -R tor:tor $HOME /run/tor
+-
+-post_run_commands:
+-    - tor:
+-        - onions --run-vanguards
+-
+-set_environment:
+-    - vanguards:
+-        - TOR_CONTROL_PORT: onions --resolve-control-port
+-reload:
+-    files:
+-        - /etc/tor/torrc
+-
+-debug: false
+diff --git a/assets/torrc b/assets/torrc
+deleted file mode 100644
+index 54083be..0000000
+--- a/assets/torrc
++++ /dev/null
+@@ -1,52 +0,0 @@
+-{% for service_group in onion.services %}
+-HiddenServiceDir {{service_group.hidden_service_dir}}
+-    {% if service_group.version == 3 %}
+-HiddenServiceVersion 3
+-    {% endif %}
+-    {% for service in service_group.services %}
+-        {% for port in service.ports %}
+-            {% if port.is_socket %}
+-HiddenServicePort {{port.port_from}} {{port.dest}}
+-            {% endif %}
+-            {% if not port.is_socket %}
+-HiddenServicePort {{port.port_from}} {{service.host}}:{{port.dest}}
+-            {% endif %}
+-        {% endfor %}
+-    {% endfor %}
+-{% endfor %}
+-DataDirectory {{ onion.data_directory }}
+-{% if 'TOR_SOCKS_PORT' in env %}
+-SocksPort {{env['TOR_SOCKS_PORT']}}
+-{% else %}
+-SocksPort 0
+-{% endif %}
+-
+-{% if envtobool('TOR_EXIT_RELAY', False) %}
+-ExitRelay 1
+-{% else %}
+-ExitRelay 0
+-{% endif %}
+-
+-{% if onion.enable_control_port %}
+-    {% if onion.control_socket %}
+-ControlPort {{onion.control_socket}}
+-    {% endif %}
+-    {% if not onion.control_socket %}
+-        {% if onion.control_ip_binding.version() == 4 %}
+-ControlPort {{onion.control_ip_binding}}:{{ onion.control_port }}
+-        {% endif %}
+-        {% if onion.control_ip_binding.version() == 6 %}
+-ControlPort [{{onion.control_ip_binding}}]:{{ onion.control_port }}
+-        {% endif %}
+-    {% endif %}
+-    {% if onion.control_hashed_password %}
+-HashedControlPassword {{ onion.control_hashed_password }}
+-    {% endif %}
+-{% endif %}
+-
+-
+-{% if 'TOR_EXTRA_OPTIONS' in env %}
+-{{env['TOR_EXTRA_OPTIONS']}}
+-{% endif %}
+-
+-# useless line for Jinja bug
+diff --git a/assets/vanguards.conf.tpl b/assets/vanguards.conf.tpl
+deleted file mode 100644
+index 9155816..0000000
+--- a/assets/vanguards.conf.tpl
++++ /dev/null
+@@ -1,145 +0,0 @@
+-## Global options
+-[Global]
+-
+-{% if (env.get('TOR_CONTROL_PORT', '')).startswith('unix:') %}
+-{% set _, unix_path = env['TOR_CONTROL_PORT'].split(':', 1) %}
+-{% elif ':' in env.get('TOR_CONTROL_PORT', '') %}
+-{% set host, port = env['TOR_CONTROL_PORT'].split(':', 1) %}
+-{% else %}
+-{% set host = env.get('TOR_CONTROL_PORT') %}
+-{% endif %}
+-
+-control_ip = {{ host or '' }}
+-
+-control_port = {{ port or 9051 }}
+-
+-control_socket = {{ unix_path or '' }}
+-
+-control_pass = {{ env.get('TOR_CONTROL_PASSWORD', '') }}
+-
+-state_file = {{ env.get('VANGUARDS_STATE_FILE', '/run/tor/data/vanguards.state') }}
+-
+-
+-{% if 'VANGUARDS_EXTRA_OPTIONS' in env %}
+-{% set extra_conf = ConfigParser().read_string(env['VANGUARDS_EXTRA_OPTIONS']) %}
+-{% if 'Global' in extra_conf %}
+-{% for key, val in extra_conf['Global'].items() %}
+-{{key}} = {{val}}
+-{% endfor %}
+-{% set _ = extra_conf.pop('Global') %}
+-{% endif %}
+-{{ extra_conf.to_string() }}
+-{% endif %}
+-
+-{#
+-## Example vanguards configuration file
+-#
+-# All values below are default values and won't appear in final config file
+-# Original here: https://github.com/mikeperry-tor/vanguards/blob/master/vanguards-example.conf
+-#
+-# Enable/disable active vanguard update of layer2 and layer3 guards
+-enable_vanguards = True
+-
+-# Enable/disable the bandwidth side channel detection checks:
+-enable_bandguards = True
+-
+-# Enable/disable circuit build timeout analysis (informational only):
+-enable_cbtverify = False
+-
+-# Enable/disable checks on Rendezvous Point overuse attacks:
+-enable_rendguard = True
+-
+-# Close circuits upon suspected attack conditions:
+-close_circuits = True
+-
+-# If True, we write (or update/rotate) layer2 and layer3 vanguards in torrc,
+-# then exit. This option disables the bandguards and rendguard defenses.
+-one_shot_vanguards = False
+-
+-# The current loglevel:
+-loglevel = NOTICE
+-
+-# If specified, log to this file instead of stdout:
+-logfile =
+-
+-## Vanguards: layer1, layer2, and layer3 rotation params.
+-[Vanguards]
+-
+-# How long to keep our layer1 guard (0 means use Tor default):
+-layer1_lifetime_days = 0
+-
+-# The maximum amount of time to keep a layer2 guard:
+-max_layer2_lifetime_hours = 1080
+-
+-# The maximum amount of time to keep a layer3 guard:
+-max_layer3_lifetime_hours = 48
+-
+-# The minimum amount of time to keep a layer2 guard:
+-min_layer2_lifetime_hours = 24
+-
+-# The minimum amount of time to keep a layer3 guard:
+-min_layer3_lifetime_hours = 1
+-
+-# The number of layer1 guards:
+-num_layer1_guards = 2
+-
+-# The number of layer2 guards:
+-num_layer2_guards = 3
+-
+-# The number of layer3 guards:
+-num_layer3_guards = 8
+-
+-
+-## Bandguards: Mechanisms to detect + mitigate bandwidth side channel attacks.
+-[Bandguards]
+-
+-# Maximum number of hours to allow any circuit to remain open
+-# (set to 0 to disable):
+-circ_max_age_hours = 24
+-
+-# Maximum amount of kilobytes that can be present in a hidden service
+-# descriptor before we close the circuit (set to 0 to disable):
+-circ_max_hsdesc_kilobytes = 30
+-
+-# Total maximum megabytes on any circuit before we close it. Note that
+-# while HTTP GET can resume if this limit is hit, HTTP POST will not.
+-# This means that applications that require large data submission (eg
+-# SecureDrop or onionshare) should set this much higher
+-# (or set to 0 to disable):
+-circ_max_megabytes = 0
+-
+-# Warn if we can't build or use circuits for this many seconds.
+-circ_max_disconnected_secs = 30
+-
+-# Warn if we are disconnected from the Tor network for this many seconds.
+-conn_max_disconnected_secs = 15
+-
+-## Rendguard: Monitors service-side Rendezvous Points to detect misuse/attack
+-[Rendguard]
+-
+-# No relay should show up as a Rendezvous Point more often than this ratio
+-# multiplied by its bandwidth weight:
+-rend_use_max_use_to_bw_ratio = 5.0
+-
+-# What is percent of the network weight is not in the consensus right now?
+-# Put another way, the max number of rend requests from relays not in the
+-# consensus is rend_use_max_use_to_bw_ratio times this churn rate.
+-rend_use_max_consensus_weight_churn = 1.0
+-
+-# Close circuits where the Rendezvous Point appears too often. Note that an
+-# adversary can deliberately cause RP overuse in order to impact availability.
+-# If this is a concern, either set this to false, or raise the ratio
+-# parameter above.
+-rend_use_close_circuits_on_overuse = True
+-
+-# Total number of circuits we need before we begin enforcing rendezvous point
+-# ratio limits:
+-rend_use_global_start_count = 1000
+-
+-# Number of times a relay must be seen as a Rendezvous Point before applying
+-# ratio limits:
+-rend_use_relay_start_count = 100
+-
+-# Divide all relay counts by two once the total circuit count hits this many:
+-rend_use_scale_at_count = 20000
+-#}
+diff --git a/bin/docker-entrypoint b/bin/docker-entrypoint
+new file mode 100755
+index 0000000..1f0985a
+--- /dev/null
++++ b/bin/docker-entrypoint
+@@ -0,0 +1,69 @@
++#!/usr/bin/env bash
++# Container entrypoint: configure onion services from the environment, then
++# run tor as the unprivileged tor user. Any other command is run unchanged.
++set -euo pipefail
++
++TORRC=${ONIONS_TORRC:-/etc/tor/torrc}
++TOR_USER=${TOR_USER:-tor}
++
++log() { printf 'entrypoint: %s\n' "$*" >&2; }
++
++[[ $# -eq 0 ]] && set -- tor
++
++if [[ $1 != tor ]]; then
++    exec "$@"
++fi
++
++onions --setup-hosts
++
++mkdir -p /run/tor
++if [[ $(id -u) -eq 0 ]]; then
++    chmod -R 700 "$HOME" /run/tor
++    chown -R "$TOR_USER:$TOR_USER" "$HOME" /run/tor
++fi
++
++# Keep keys, service mappings and passwords out of tor's environment
++for var in $(compgen -e); do
++    case $var in
++        *_KEY | *_PORTS | *_SERVICE_NAME | *_TOR_SERVICE_* | TOR_SOCKS_PORT | TOR_CONTROL_PASSWORD)
++            unset "$var"
++            ;;
++    esac
++done
++
++# tor keeps this shell's pid once exec'd below
++tor_pid=$$
++
++# Display onion addresses once tor has written the hostname files
++(
++    mapfile -t hostnames < <(awk '$1 == "HiddenServiceDir" { print $2 "/hostname" }' "$TORRC")
++    for _ in $(seq 120); do
++        ready=1
++        for f in "${hostnames[@]}"; do
++            [[ -s $f ]] || ready=0
++        done
++        if ((ready)); then
++            onions
++            exit 0
++        fi
++        sleep 1
++    done
++    log "onion addresses not available after 120s, run 'onions' later"
++) &
++
++# Reload tor configuration (SIGHUP) when torrc changes
++if [[ -z ${ENTRYPOINT_DISABLE_RELOAD:-} ]] && command -v inotifyd >/dev/null; then
++    (
++        inotifyd - "$(dirname "$TORRC"):wy" | while IFS=$'\t' read -r _ _ name; do
++            if [[ $name == "$(basename "$TORRC")" ]]; then
++                log "$TORRC changed, reloading tor"
++                kill -HUP "$tor_pid" 2>/dev/null || true
++            fi
++        done
++    ) &
++fi
++
++if [[ $(id -u) -eq 0 ]]; then
++    exec su-exec "$TOR_USER:$TOR_USER" "$@"
++fi
++exec "$@"
+diff --git a/bin/onions b/bin/onions
+new file mode 100755
+index 0000000..07130fe
+--- /dev/null
++++ b/bin/onions
+@@ -0,0 +1,581 @@
++#!/usr/bin/env bash
++# onions: configure tor onion services from environment variables and display
++# the onion addresses of the configured services.
++#
++#   onions                 display configured onion services
++#   onions --json          same, as JSON
++#   onions --setup-hosts   write keys and torrc from the environment
++#                          (onion addresses are known once tor has started)
++#
++# Key generation and onion address computation are delegated to tor itself:
++# when a hidden service directory only contains hs_ed25519_secret_key (or
++# nothing at all), tor derives (or generates) the keypair and writes the
++# hostname file on startup.
++set -uo pipefail
++
++HIDDEN_SERVICE_DIR=${HIDDEN_SERVICE_DIR:-/var/lib/tor/hidden_service}
++HIDDEN_SERVICE_DIR=${HIDDEN_SERVICE_DIR%/}
++DATA_DIRECTORY=${TOR_DATA_DIRECTORY:-/run/tor/data}
++TORRC=${ONIONS_TORRC:-/etc/tor/torrc}
++SECRETS_DIR=${ONIONS_SECRETS_DIR:-/run/secrets}
++HOSTS_FILE=${ONIONS_HOSTS_FILE:-/etc/hosts}
++TOR_BIN=${ONIONS_TOR_BIN:-tor}
++DEFAULT_CONTROL_PORT=9051
++KEY_HEADER='== ed25519v1-secret: type0 =='
++KEY_SIZE=96
++
++GROUP_ORDER=()
++declare -A GROUP_HOSTS=()   # group -> space separated hosts
++declare -A GROUP_KEY=()     # group -> path of the secret key file to install
++declare -A SERVICE_PORTS=() # "group|host" -> space separated "from:dest"
++WORKDIR=
++
++log_error() { printf 'onions: ERROR: %s\n' "$*" >&2; }
++log_warning() { printf 'onions: WARNING: %s\n' "$*" >&2; }
++
++usage() {
++    cat <<EOF
++usage: onions [-h] [--json] [--setup-hosts]
++
++Display onion sites
++
++options:
++  -h, --help     show this help message and exit
++  --json         serialize to json
++  --setup-hosts  Setup hosts
++EOF
++}
++
++env_to_bool() {
++    local value=${!1:-$2}
++    case ${value,,} in
++        y | yes | t | true | on | 1) return 0 ;;
++        n | no | f | false | off | 0) return 1 ;;
++        *)
++            log_error "invalid boolean value '$value' for $1"
++            return 1
++            ;;
++    esac
++}
++
++trim() {
++    local s=$1
++    s=${s#"${s%%[![:space:]]*}"}
++    s=${s%"${s##*[![:space:]]}"}
++    printf '%s' "$s"
++}
++
++# --- service groups ---------------------------------------------------------
++
++group_exists() { [[ -v "GROUP_HOSTS[$1]" ]]; }
++
++group_dir() { printf '%s/%s' "$HIDDEN_SERVICE_DIR" "$1"; }
++
++add_group() {
++    local name=$1
++    group_exists "$name" && return 0
++    if [[ ! $name =~ ^[a-zA-Z0-9_-]+$ ]]; then
++        log_error "Group $name has invalid name"
++        return 1
++    fi
++    GROUP_ORDER+=("$name")
++    GROUP_HOSTS[$name]=""
++}
++
++group_of_host() {
++    local group host
++    for group in "${GROUP_ORDER[@]}"; do
++        for host in ${GROUP_HOSTS[$group]}; do
++            if [[ $host == "$1" ]]; then
++                printf '%s' "$group"
++                return 0
++            fi
++        done
++    done
++    return 1
++}
++
++valid_host() {
++    if [[ ! $1 =~ ^[a-zA-Z0-9._-]+$ ]]; then
++        log_error "Invalid host name '$1'"
++        return 1
++    fi
++}
++
++add_service() {
++    local group=$1 host=$2 h
++    valid_host "$host" || return 1
++    for h in ${GROUP_HOSTS[$group]}; do
++        [[ $h == "$host" ]] && return 0
++    done
++    GROUP_HOSTS[$group]+="${GROUP_HOSTS[$group]:+ }$host"
++}
++
++# Set HOST_GROUP to the group owning host, creating a group named after the
++# host when the host is not part of any group yet.
++HOST_GROUP=
++ensure_host_group() {
++    local host=$1
++    valid_host "$host" || return 1
++    if HOST_GROUP=$(group_of_host "$host"); then
++        return 0
++    fi
++    add_group "$host" && add_service "$host" "$host" || return 1
++    HOST_GROUP=$host
++}
++
++# add_ports GROUP HOST "from:dest[,from:dest...]"
++add_ports() {
++    local group=$1 host=$2 csv=$3 entry from dest
++    local -a entries parsed=()
++    csv=${csv//[$'\r\n']/}
++    IFS=, read -r -a entries <<<"$csv"
++    for entry in "${entries[@]}"; do
++        entry=$(trim "$entry")
++        [[ -z $entry ]] && continue
++        if [[ $entry != *:* ]]; then
++            log_error "Invalid port mapping '$entry'"
++            return 1
++        fi
++        from=$(trim "${entry%%:*}")
++        dest=$(trim "${entry#*:}")
++        if [[ ! $from =~ ^[0-9]+$ ]]; then
++            log_error "Invalid port '$from' in '$entry'"
++            return 1
++        fi
++        if [[ $dest == unix:* ]]; then
++            if [[ $dest =~ [[:space:]] ]]; then
++                log_error "Invalid socket path in '$entry'"
++                return 1
++            fi
++        elif [[ $dest =~ ^[0-9]+$ ]]; then
++            dest=$((10#$dest))
++        else
++            log_error "Invalid port '$dest' in '$entry'"
++            return 1
++        fi
++        parsed+=("$((10#$from)):$dest")
++    done
++    local key="$group|$host"
++    for entry in "${parsed[@]}"; do
++        SERVICE_PORTS[$key]+="${SERVICE_PORTS[$key]:+ }$entry"
++    done
++}
++
++# --- keys -------------------------------------------------------------------
++
++validate_key_file() {
++    local file=$1 size header
++    size=$(wc -c <"$file") || return 1
++    header=$(head -c ${#KEY_HEADER} "$file") || return 1
++    if [[ $header != "$KEY_HEADER" ]]; then
++        log_error "Private key does not seem to be a valid ed25519 tor key"
++        return 1
++    fi
++    if ((size != KEY_SIZE)); then
++        log_error "Private key does not seem to have the right length"
++        return 1
++    fi
++}
++
++# set_group_key GROUP BASE64_KEY
++set_group_key() {
++    local group=$1 file
++    add_group "$group" || return 1
++    file="$WORKDIR/$group.key"
++    if ! printf '%s' "$2" | tr -d ' \t\r\n' | base64 -d >"$file" 2>/dev/null; then
++        log_error "Private key is not valid base64"
++        return 1
++    fi
++    validate_key_file "$file" || return 1
++    [[ -n ${GROUP_KEY[$group]:-} ]] && log_warning 'Secret key already set, overriding'
++    GROUP_KEY[$group]=$file
++}
++
++# Key precedence: environment > key already on disk > docker secret.
++# Without any key, tor generates a new one on startup.
++resolve_key() {
++    local group=$1 secret
++    [[ -n ${GROUP_KEY[$group]:-} ]] && return 0
++    [[ -f "$(group_dir "$group")/hs_ed25519_secret_key" ]] && return 0
++    secret="$SECRETS_DIR/$group"
++    [[ -f $secret ]] || return 0
++    if validate_key_file "$secret"; then
++        GROUP_KEY[$group]=$secret
++    else
++        log_warning "Fail to load key from secret $secret," \
++            "check the key or secret name collision"
++    fi
++}
++
++# --- environment handlers ---------------------------------------------------
++
++# {HOST}_SERVICE_NAME=group
++set_service_name() {
++    add_group "$2" && add_service "$2" "$1"
++}
++
++# {HOST}_PORTS=from:dest,...
++set_ports() {
++    ensure_host_group "$1" && add_ports "$HOST_GROUP" "$1" "$2"
++}
++
++# {HOST}_KEY=base64 key (deprecated)
++set_host_key() {
++    ensure_host_group "$1" && set_group_key "$HOST_GROUP" "$2"
++}
++
++# {GROUP}_TOR_SERVICE_VERSION=3
++set_group_version() {
++    if [[ ! $2 =~ ^[0-9]+$ ]] || ((10#$2 != 3)); then
++        log_error "Url version $2 is not supported"
++        return 1
++    fi
++    add_group "$1"
++}
++
++# {GROUP}_TOR_SERVICE_HOSTS=from:host:dest,from:unix:/path,...
++set_group_hosts() {
++    local group=$1 csv=$2 entry from host dest
++    local -a entries
++    add_group "$group" || return 1
++    csv=${csv//[$'\r\n']/}
++    IFS=, read -r -a entries <<<"$csv"
++    for entry in "${entries[@]}"; do
++        entry=$(trim "$entry")
++        [[ -z $entry ]] && continue
++        if [[ ! $entry =~ ^([^:]+):([^:]+):(.+)$ ]]; then
++            log_error "Invalid service host mapping '$entry'"
++            return 1
++        fi
++        from=${BASH_REMATCH[1]} host=${BASH_REMATCH[2]} dest=${BASH_REMATCH[3]}
++        if [[ $host == unix && $dest == /* ]]; then
++            add_service "$group" "$group" &&
++                add_ports "$group" "$group" "$from:unix:$dest" || return 1
++        else
++            add_service "$group" "$host" &&
++                add_ports "$group" "$host" "$from:$dest" || return 1
++        fi
++    done
++}
++
++apply_env_rule() {
++    local regex=$1 handler=$2 name
++    for name in $(compgen -e); do
++        # Ignore GPG_KEY env variable to avoid warning (deprecated setup)
++        [[ $name == GPG_KEY ]] && continue
++        if [[ $name =~ $regex ]]; then
++            "$handler" "${BASH_REMATCH[1],,}" "${!name}" ||
++                log_error "Fail to setup from $name environment"
++        fi
++    done
++}
++
++setup_from_env() {
++    apply_env_rule '^([A-Z0-9]+)_SERVICE_NAME$' set_service_name
++    apply_env_rule '^([A-Z0-9]+)_PORTS$' set_ports
++    apply_env_rule '^([A-Z0-9]+)_KEY$' set_host_key
++    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_VERSION$' set_group_version
++    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_KEY$' set_group_key
++    apply_env_rule '^([A-Z0-9]+)_TOR_SERVICE_HOSTS$' set_group_hosts
++}
++
++# Legacy docker links (--link): linked containers are listed in /etc/hosts
++# and expose {ALIAS}_NAME and {ALIAS}_PORT_{port}_TCP environment variables.
++setup_from_links() {
++    [[ -r $HOSTS_FILE ]] || return 0
++    local ip first rest env_name name upper best port var
++    local -a ips=()
++    declare -A names=() link_env=()
++    while read -r ip first rest; do
++        [[ -z $ip || $ip == \#* || -z $rest ]] && continue
++        if [[ -v "names[$ip]" ]]; then
++            names[$ip]+=" $first $rest"
++            continue
++        fi
++        env_name=${first^^}
++        env_name=${env_name//-/_}
++        [[ $env_name =~ ^[A-Z0-9_]+$ ]] || continue
++        if [[ -v "${env_name}_NAME" ]]; then
++            ips+=("$ip")
++            names[$ip]="$first $rest"
++            link_env[$ip]=$env_name
++        fi
++    done <"$HOSTS_FILE"
++
++    for ip in "${ips[@]}"; do
++        # Use the shortest name matching some environment variable
++        best=
++        for name in ${names[$ip]}; do
++            upper=${name^^}
++            upper=${upper//-/_}
++            [[ -n $(compgen -e -- "$upper") ]] || continue
++            if [[ -z $best ]] || ((${#name} < ${#best})); then
++                best=$name
++            fi
++        done
++        [[ -z $best ]] && continue
++        ensure_host_group "$best" || continue
++        for var in $(compgen -e -- "${link_env[$ip]}_PORT_"); do
++            [[ $var =~ ^${link_env[$ip]}_PORT_([0-9]+)_TCP$ ]] || continue
++            port=${BASH_REMATCH[1]}
++            add_ports "$HOST_GROUP" "$best" "${PORT_MAP:-$port}:$port" ||
++                log_error "Fail to setup ports from docker link $var"
++        done
++    done
++}
++
++# Drop invalid groups
++check_services() {
++    local group host port err
++    local -a valid=() hosts ports
++    for group in "${GROUP_ORDER[@]}"; do
++        err=
++        read -r -a hosts <<<"${GROUP_HOSTS[$group]}"
++        declare -A seen=()
++        if ((${#hosts[@]} == 0)); then
++            err="Service group $group has no service"
++        fi
++        for host in "${hosts[@]}"; do
++            read -r -a ports <<<"${SERVICE_PORTS[$group|$host]:-}"
++            if ((${#ports[@]} == 0)); then
++                err="Service $host has not ports set"
++                break
++            fi
++            for port in "${ports[@]}"; do
++                if ((${#hosts[@]} > 1)) && [[ ${port#*:} == unix:* ]]; then
++                    err="Cannot use socket and ports in the same $host"
++                    break 2
++                fi
++                if [[ -v "seen[${port%%:*}]" ]]; then
++                    err="Same port for multiple services in $group group"
++                    break 2
++                fi
++                seen[${port%%:*}]=1
++            done
++        done
++        unset seen
++        if [[ -n $err ]]; then
++            log_error "$err"
++        else
++            valid+=("$group")
++        fi
++    done
++    GROUP_ORDER=("${valid[@]}")
++}
++
++# --- torrc ------------------------------------------------------------------
++
++is_ipv4() {
++    local IFS=. octet
++    local -a octets
++    [[ $1 =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
++    read -r -a octets <<<"$1"
++    for octet in "${octets[@]}"; do
++        ((10#$octet <= 255)) || return 1
++    done
++}
++
++render_control_port() {
++    [[ -v TOR_CONTROL_PORT ]] || return 0
++    local spec=$TOR_CONTROL_PORT host port=$DEFAULT_CONTROL_PORT family=4 hashed
++    if [[ $spec == unix:* ]]; then
++        printf 'ControlPort %s\n' "$spec"
++    else
++        if [[ $spec =~ ^\[([0-9A-Fa-f:.]+)\](:([0-9]+))?$ ]]; then
++            host=${BASH_REMATCH[1]} port=${BASH_REMATCH[3]:-$port} family=6
++        elif [[ $spec == *:*:* ]]; then
++            host=$spec family=6
++        elif [[ $spec == *:* ]]; then
++            host=${spec%:*} port=${spec##*:}
++        else
++            host=$spec
++        fi
++        if [[ $family == 4 ]] && ! is_ipv4 "$host" ||
++            [[ $family == 6 && ! $host =~ ^[0-9A-Fa-f:.]+$ ]] ||
++            [[ ! $port =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65535)); then
++            log_error "TOR_CONTROL_PORT environment variable error:" \
++                "expected ip, ip:port, [ipv6]:port or unix:/path, got '$spec'"
++            return 1
++        fi
++        if [[ $family == 4 ]]; then
++            printf 'ControlPort %s:%d\n' "$host" "$((10#$port))"
++        else
++            printf 'ControlPort [%s]:%d\n' "$host" "$((10#$port))"
++        fi
++    fi
++    if [[ -n ${TOR_CONTROL_PASSWORD:-} ]]; then
++        if ! hashed=$(HOME=/tmp "$TOR_BIN" --quiet --hash-password "$TOR_CONTROL_PASSWORD"); then
++            log_error "Fail to hash control port password"
++            return 1
++        fi
++        printf 'HashedControlPassword %s\n' "$(trim "$hashed")"
++    fi
++}
++
++render_torrc() {
++    local group host port from dest
++    local -a ports
++    for group in "${GROUP_ORDER[@]}"; do
++        printf 'HiddenServiceDir %s\n' "$(group_dir "$group")"
++        printf 'HiddenServiceVersion 3\n'
++        for host in ${GROUP_HOSTS[$group]}; do
++            read -r -a ports <<<"${SERVICE_PORTS[$group|$host]:-}"
++            for port in "${ports[@]}"; do
++                from=${port%%:*} dest=${port#*:}
++                if [[ $dest == unix:* ]]; then
++                    printf 'HiddenServicePort %s %s\n' "$from" "$dest"
++                else
++                    printf 'HiddenServicePort %s %s:%s\n' "$from" "$host" "$dest"
++                fi
++            done
++        done
++        printf '\n'
++    done
++    printf 'DataDirectory %s\n' "$DATA_DIRECTORY"
++    if [[ -v TOR_SOCKS_PORT ]]; then
++        printf 'SocksPort %s\n' "$TOR_SOCKS_PORT"
++    else
++        printf 'SocksPort 0\n'
++    fi
++    if env_to_bool TOR_EXIT_RELAY false 2>/dev/null; then
++        printf 'ExitRelay 1\n'
++    else
++        printf 'ExitRelay 0\n'
++    fi
++    render_control_port || return 1
++    if [[ -v TOR_EXTRA_OPTIONS ]]; then
++        printf '\n%s\n' "$TOR_EXTRA_OPTIONS"
++    fi
++}
++
++write_group() {
++    local group=$1 dir key=${GROUP_KEY[$1]:-}
++    dir=$(group_dir "$group")
++    mkdir -p "$dir" && chmod 700 "$dir" || return 1
++    [[ -z $key ]] && return 0
++    # tor derives the public key and hostname from the secret key on startup
++    rm -f "$dir/hostname" "$dir/hs_ed25519_public_key"
++    cp "$key" "$dir/hs_ed25519_secret_key" &&
++        chmod 600 "$dir/hs_ed25519_secret_key"
++}
++
++setup_hosts() {
++    local group torrc
++    WORKDIR=$(mktemp -d) || return 1
++    # shellcheck disable=SC2064
++    trap "rm -rf '$WORKDIR'" EXIT
++
++    setup_from_env
++    setup_from_links
++    check_services
++
++    if env_to_bool TOR_ENABLE_VANGUARDS false 2>/dev/null; then
++        log_warning "TOR_ENABLE_VANGUARDS is not supported anymore (vanguards" \
++            "is a python tool); tor >= 0.4.7 ships vanguards-lite by default"
++    fi
++
++    for group in "${GROUP_ORDER[@]}"; do
++        resolve_key "$group"
++    done
++    torrc=$(render_torrc) || return 1
++    for group in "${GROUP_ORDER[@]}"; do
++        write_group "$group" || {
++            log_error "Fail to write keys for $group"
++            return 1
++        }
++    done
++    mkdir -p "$(dirname "$TORRC")" &&
++        printf '%s\n' "$torrc" >"$TORRC.tmp" &&
++        mv "$TORRC.tmp" "$TORRC"
++}
++
++# --- display ----------------------------------------------------------------
++
++show() {
++    local json=$1 keyword arg1 _rest group onion url sep first=1
++    local -a order=() urls
++    declare -A dirs=() ports=()
++    if [[ -r $TORRC ]]; then
++        while read -r keyword arg1 _rest; do
++            case $keyword in
++                HiddenServiceDir)
++                    group=$(basename "$arg1")
++                    order+=("$group")
++                    dirs[$group]=$arg1
++                    ports[$group]=""
++                    ;;
++                HiddenServicePort)
++                    [[ -n ${group:-} ]] && ports[$group]+=" $arg1"
++                    ;;
++            esac
++        done <"$TORRC"
++    fi
++
++    if ((${#order[@]} == 0)); then
++        if [[ $json == 1 ]]; then echo '{}'; else echo 'No onion site'; fi
++        return 0
++    fi
++
++    [[ $json == 1 ]] && printf '{'
++    for group in "${order[@]}"; do
++        onion=$(cat "${dirs[$group]}/hostname" 2>/dev/null)
++        onion=$(trim "$onion")
++        urls=()
++        if [[ -n $onion ]]; then
++            for url in ${ports[$group]}; do
++                urls+=("$onion:$url")
++            done
++        fi
++        if [[ $json == 1 ]]; then
++            ((first)) || printf ', '
++            first=0
++            printf '"%s": [' "$group"
++            sep=
++            for url in "${urls[@]}"; do
++                printf '%s"%s"' "$sep" "$url"
++                sep=', '
++            done
++            printf ']'
++        elif [[ -z $onion ]]; then
++            printf '%s: onion address not generated yet (is tor running?)\n' "$group"
++        else
++            printf '%s: ' "$group"
++            sep=
++            for url in "${urls[@]}"; do
++                printf '%s%s' "$sep" "$url"
++                sep=', '
++            done
++            printf '\n'
++        fi
++    done
++    [[ $json == 1 ]] && printf '}\n'
++    return 0
++}
++
++main() {
++    local json=0 setup=0
++    while (($#)); do
++        case $1 in
++            --json) json=1 ;;
++            --setup-hosts) setup=1 ;;
++            -h | --help)
++                usage
++                return 0
++                ;;
++            *)
++                usage >&2
++                log_error "unrecognized argument: $1"
++                return 2
++                ;;
++        esac
++        shift
++    done
++    if ((setup)); then
++        setup_hosts
++        return
++    fi
++    show "$json"
++}
++
++main "$@"
+diff --git a/docker-compose.vanguards-network.yml b/docker-compose.vanguards-network.yml
+deleted file mode 100644
+index a203f18..0000000
+--- a/docker-compose.vanguards-network.yml
++++ /dev/null
+@@ -1,105 +0,0 @@
+-# Run secure vanguards using network
+-version: "3.1"
+-
+-services:
+-  # Tor container
+-  tor:
+-    image: goldy/tor-hidden-service:$CUR_TAG
+-    environment:
+-        # Enable control port with ip binding (see networks configuration bellow)
+-        # Using network interface instead of 0.0.0.0 help to protect control port from hidden services.
+-        TOR_CONTROL_PORT: 172.16.111.10
+-        # Set controle port password (optionnal)
+-        TOR_CONTROL_PASSWORD: something_secret
+-
+-        # You can change any options here, excepted control_* ones and state_file
+-        VANGUARDS_EXTRA_OPTIONS: |
+-          [Global]
+-          enable_cbtverify = True
+-          loglevel = DEBUG
+-
+-        HELLO_TOR_SERVICE_HOSTS: '80:hello:80'
+-        HELLO_TOR_SERVICE_VERSION: '3'
+-
+-    # Keep keys in volumes
+-    volumes:
+-      # Keep keys in volumes
+-      - tor-keys:/var/lib/tor/hidden_service/
+-      - tor-data:/run/tor/data
+-
+-    # Set secret for key, use the same name as the service
+-    secrets:
+-      - source: hello
+-        target: hello
+-        mode: 0400
+-
+-    networks:
+-      hidden_services:
+-        ipv4_address: 172.16.222.10
+-      tor_control:
+-        # Set an ip address for tor_control network to bind for the good network
+-        ipv4_address: 172.16.111.10
+-
+-
+-  # Vanguards container
+-  vanguards:
+-    depends_on:
+-      - tor
+-
+-    # Use the same image
+-    image: goldy/tor-hidden-service:$CUR_TAG
+-
+-    # Run vanguards
+-    command: vanguards
+-
+-    environment:
+-      # Set tor hostname (or ip:port or unix:/path/to/socket.sock)
+-      TOR_CONTROL_PORT: tor:9051
+-      # set password if needed
+-      TOR_CONTROL_PASSWORD: something_secret
+-
+-    # Vanguards is assigned to tor_control network
+-    networks:
+-      - tor_control
+-
+-    # Sharing tor-data volume with tor container
+-    volumes:
+-      - tor-data:/run/tor/data
+-
+-
+-  # Hidden service container
+-  hello:
+-    image: tutum/hello-world
+-    hostname: hello
+-    depends_on:
+-      - tor
+-    # this hidden service is assigned to hidden_services network
+-    networks:
+-      - hidden_services
+-
+-
+-volumes:
+-    tor-keys:
+-        driver: local
+-    tor-data:
+-        driver: local
+-
+-secrets:
+-    hello:
+-        file: ./private_key_bar_v3
+-
+-networks:
+-    # This network is used for hidden services
+-    hidden_services:
+-        driver: bridge
+-        ipam:
+-            driver: default
+-            config:
+-                - subnet: 172.16.222.0/24
+-    # This network is used for vagrands to get access to tor
+-    tor_control:
+-        driver: bridge
+-        ipam:
+-            driver: default
+-            config:
+-                - subnet: 172.16.111.0/24
+diff --git a/docker-compose.vanguards.yml b/docker-compose.vanguards.yml
+deleted file mode 100644
+index f2850aa..0000000
+--- a/docker-compose.vanguards.yml
++++ /dev/null
+@@ -1,44 +0,0 @@
+-# Secure vangard in the same container
+-
+-version: "3.1"
+-
+-services:
+-  tor:
+-    image: goldy/tor-hidden-service:$CUR_TAG
+-    environment:
+-        # Enable Vanguards like this
+-        TOR_ENABLE_VANGUARDS: 'true'
+-
+-        # You can change any options here, excepted control_* ones
+-        VANGUARDS_EXTRA_OPTIONS: |
+-          [Global]
+-          enable_cbtverify = True
+-          loglevel = DEBUG
+-
+-        HELLO_TOR_SERVICE_HOSTS: '80:hello:80'
+-        HELLO_TOR_SERVICE_VERSION: '3'
+-
+-
+-    # Keep keys in volumes
+-    volumes:
+-      - tor-keys:/var/lib/tor/hidden_service/
+-
+-    # Set secret for key, use the same name as the service
+-    secrets:
+-      - source: hello
+-        target: hello
+-        mode: 0400
+-
+-  hello:
+-    image: tutum/hello-world
+-    hostname: hello
+-    depends_on:
+-      - tor
+-
+-volumes:
+-    tor-keys:
+-        driver: local
+-
+-secrets:
+-    hello:
+-        file: ./private_key_bar_v3
+diff --git a/onions/Onions.py b/onions/Onions.py
+deleted file mode 100644
+index 379fbae..0000000
+--- a/onions/Onions.py
++++ /dev/null
+@@ -1,521 +0,0 @@
+-#!/usr/bin/env python3
+-import argparse
+-import logging
+-import os
+-import socket
+-import subprocess
+-import sys
+-from base64 import b64decode
+-from json import dumps
+-from re import match
+-
+-from IPy import IP
+-from jinja2 import Environment
+-from jinja2 import FileSystemLoader
+-from pyentrypoint import DockerLinks
+-from pyentrypoint.config import envtobool
+-from pyentrypoint.configparser import ConfigParser
+-
+-from .Service import Service
+-from .Service import ServicesGroup
+-
+-
+-class Setup(object):
+-
+-    hidden_service_dir = "/var/lib/tor/hidden_service/"
+-    data_directory = "/run/tor/data"
+-    torrc = '/etc/tor/torrc'
+-    torrc_template = '/var/local/tor/torrc.tpl'
+-    enable_control_port = False
+-    control_port = 9051
+-    control_ip_binding = IP('0.0.0.0')
+-    control_hashed_password = None
+-    control_socket = 'unix:/run/tor/tor_control.sock'
+-    enable_vanguards = False
+-    vanguards_template = '/var/local/tor/vanguards.conf.tpl'
+-    vanguards_conf = '/etc/tor/vanguards.conf'
+-
+-    def _add_host(self, host):
+-        if host not in self.setup:
+-            self.setup[host] = {}
+-
+-    def _get_ports(self, host, ports):
+-        self._add_host(host)
+-        if 'ports' not in self.setup[host]:
+-            self.setup[host]['ports'] = {host: []}
+-        if host not in self.setup[host]['ports']:
+-            self.setup[host]['ports'][host] = []
+-        ports_l = [
+-            [
+-                int(v) if not v.startswith('unix:') else v
+-                for v in sp.split(':', 1)
+-            ] for sp in ports.split(',')
+-        ]
+-        for port in ports_l:
+-            assert len(port) == 2
+-            if port not in self.setup[host]['ports'][host]:
+-                self.setup[host]['ports'][host].append(port)
+-
+-    def _hash_control_port_password(self, password):
+-        self.control_hashed_password = subprocess.check_output(
+-            ['/usr/local/bin/tor', '--quiet', '--hash-password', password],
+-            env={'HOME': '/tmp'}
+-        ).decode()
+-
+-    def _parse_control_port_variable(self, check_ip=True):
+-        control_port = os.environ['TOR_CONTROL_PORT']
+-        try:
+-            if control_port.startswith('unix:'):
+-                self.control_socket = control_port
+-                return
+-            self.control_socket = None
+-            if ':' in control_port:
+-                host, port = control_port.split(':')
+-                self.control_ip_binding = IP(host) if check_ip else host
+-                self.control_port = int(port)
+-                return
+-            self.control_ip_binding = (
+-                IP(control_port) if check_ip else control_port
+-            )
+-        except BaseException as e:
+-            logging.error('TOR_CONTROL_PORT environment variable error')
+-            logging.exception(e)
+-
+-    def _setup_control_port(self):
+-        if 'TOR_CONTROL_PORT' not in os.environ:
+-            return
+-        self.enable_control_port = True
+-        self._parse_control_port_variable()
+-
+-        if os.environ.get('TOR_CONTROL_PASSWORD'):
+-            self._hash_control_port_password(os.environ[
+-                'TOR_CONTROL_PASSWORD'
+-            ])
+-        if envtobool('TOR_DATA_DIRECTORY', False):
+-            self.data_directory = os.environ['TOR_DATA_DIRECTORY']
+-
+-    def _setup_vanguards(self):
+-        if not envtobool('TOR_ENABLE_VANGUARDS', False):
+-            return
+-        self.enable_control_port = True
+-        self.enable_vanguards = True
+-        os.environ.setdefault('TOR_CONTROL_PORT', self.control_socket)
+-        self.kill_tor_on_vanguard_exit = envtobool(
+-            'VANGUARD_KILL_TOR_ON_EXIT',
+-            True
+-        )
+-        self.vanguards_state_file = os.path.join(
+-            self.data_directory,
+-            'vanguards.state'
+-        )
+-
+-    def _get_key(self, host, key):
+-        self._add_host(host)
+-        assert len(key) > 800
+-        self.setup[host]['key'] = key
+-
+-    def _load_keys_in_services(self, secret=True):
+-        for service in self.services:
+-            service.load_key(secret=secret)
+-
+-    def _get_service(self, host, service):
+-        self._add_host(host)
+-        self.setup[host]['service'] = service
+-
+-    def find_group_by_service(self, service):
+-        for group in self.services:
+-            if service in group.services:
+-                return group
+-
+-    def find_group_by_name(self, name):
+-        for group in self.services:
+-            if name == group.name:
+-                return group
+-
+-    def find_service_by_host(self, host):
+-        for group in self.services:
+-            service = group.get_service_by_host(host)
+-            if service:
+-                return service
+-
+-    def add_empty_group(self, name, version=None):
+-        if self.find_group_by_name(name):
+-            raise Exception('Group {name} already exists'.format(name=name))
+-        group = ServicesGroup(name=name, version=version)
+-        self.services.append(group)
+-        return group
+-
+-    def add_new_service(self,
+-                        host,
+-                        name=None,
+-                        ports=None,
+-                        key=None):
+-        group = self.find_group_by_name(name)
+-        if group:
+-            service = group.get_service_by_host(host)
+-        else:
+-            service = self.find_service_by_host(host)
+-        if not service:
+-            service = Service(host=host)
+-            if not group:
+-                group = ServicesGroup(
+-                    service=service,
+-                    name=name,
+-                    hidden_service_dir=self.hidden_service_dir,
+-                )
+-            else:
+-                group.add_service(service)
+-            if group not in self.services:
+-                self.services.append(group)
+-        elif group and service not in group.services:
+-            group.add_service(service)
+-        else:
+-            self.find_group_by_service(service)
+-        if key:
+-            group.add_key(key)
+-        if ports:
+-            service.add_ports(ports)
+-        return service
+-
+-    def _set_service_names(self):
+-        'Create groups for services, should be run first'
+-        reg = r'([A-Z0-9]*)_SERVICE_NAME'
+-        for key, val in os.environ.items():
+-            m = match(reg, key)
+-            if m:
+-                try:
+-                    self.add_new_service(host=m.groups()[0].lower(), name=val)
+-                except BaseException as e:
+-                    logging.error(f"Fail to setup from {key} environment")
+-                    logging.error(e)
+-
+-    def _set_ports(self, host, ports):
+-        self.add_new_service(host=host, ports=ports)
+-
+-    def _set_key(self, host, key):
+-        self.add_new_service(host=host, key=key.encode())
+-
+-    def _setup_from_env(self, match_map):
+-        for reg, call in match_map:
+-            for key, val in os.environ.items():
+-                m = match(reg, key)
+-                # Ignore GPG_KEY env variable to avoid warning
+-                # (this is a deprecated setup)
+-                if m and key != 'GPG_KEY':
+-                    try:
+-                        call(m.groups()[0].lower(), val)
+-                    except BaseException as e:
+-                        logging.error(f"Fail to setup from {key} environment")
+-                        logging.error(e)
+-
+-    def _setup_keys_and_ports_from_env(self):
+-        self._setup_from_env(
+-            (
+-                (r'([A-Z0-9]+)_PORTS', self._set_ports),
+-                (r'([A-Z0-9]+)_KEY', self._set_key),
+-            )
+-        )
+-
+-    def get_or_create_empty_group(self, name, version=None):
+-        group = self.find_group_by_name(name)
+-        if group:
+-            if version:
+-                group.set_version(version)
+-            return group
+-        return self.add_empty_group(name, version)
+-
+-    def _set_group_version(self, name, version):
+-        'Setup groups with version'
+-        group = self.get_or_create_empty_group(name, version=version)
+-        group.set_version(version)
+-
+-    def _set_group_key(self, name, key):
+-        'Set key for service group'
+-        group = self.get_or_create_empty_group(name)
+-        if group.version == 3:
+-            group.add_key(b64decode(key))
+-        else:
+-            group.add_key(key)
+-
+-    def _set_group_hosts(self, name, hosts):
+-        'Set services for service groups'
+-        self.get_or_create_empty_group(name)
+-        for host_map in hosts.split(','):
+-            host_map = host_map.strip()
+-            port_from, host, port_dest = host_map.split(':', 2)
+-            if host == 'unix' and port_dest.startswith('/'):
+-                self.add_new_service(host=name, name=name, ports=host_map)
+-            else:
+-                ports = '{frm}:{dst}'.format(frm=port_from, dst=port_dest)
+-                self.add_new_service(host=host, name=name, ports=ports)
+-
+-    def _setup_services_from_env(self):
+-        self._setup_from_env(
+-            (
+-                (r'([A-Z0-9]+)_TOR_SERVICE_VERSION', self._set_group_version),
+-                (r'([A-Z0-9]+)_TOR_SERVICE_KEY', self._set_group_key),
+-                (r'([A-Z0-9]+)_TOR_SERVICE_HOSTS', self._set_group_hosts),
+-            )
+-        )
+-
+-    def _get_setup_from_env(self):
+-        self._set_service_names()
+-        self._setup_keys_and_ports_from_env()
+-        self._setup_services_from_env()
+-
+-    def _get_setup_from_links(self):
+-        containers = DockerLinks().to_containers()
+-        if not containers:
+-            return
+-        for container in containers:
+-            host = container.names[0]
+-            self.add_new_service(host=host)
+-            for link in container.links:
+-                if link.protocol != 'tcp':
+-                    continue
+-                port_map = os.environ.get('PORT_MAP')
+-                self._set_ports(host, '{exposed}:{internal}'.format(
+-                    exposed=port_map or link.port,
+-                    internal=link.port,
+-                ))
+-
+-    def apply_conf(self):
+-        self._write_keys()
+-        self._write_torrc()
+-        if self.enable_vanguards:
+-            self._write_vanguards_conf()
+-
+-    def _write_keys(self):
+-        for service in self.services:
+-            service.write_key()
+-
+-    def _write_torrc(self):
+-        env = Environment(loader=FileSystemLoader('/'))
+-        temp = env.get_template(self.torrc_template)
+-        with open(self.torrc, mode='w') as f:
+-            f.write(temp.render(onion=self,
+-                                env=os.environ,
+-                                envtobool=envtobool,
+-                                type=type,
+-                                int=int))
+-
+-    def _write_vanguards_conf(self):
+-        env = Environment(loader=FileSystemLoader('/'))
+-        temp = env.get_template(self.vanguards_template)
+-        with open(self.vanguards_conf, mode='w') as f:
+-            f.write(temp.render(env=os.environ,
+-                                ConfigParser=ConfigParser,
+-                                envtobool=envtobool))
+-
+-    def run_vanguards(self):
+-        self._setup_vanguards()
+-        if not self.enable_vanguards:
+-            return
+-        logging.info('Vanguard enabled, starting...')
+-        if not self.kill_tor_on_vanguard_exit:
+-            os.execvp('vanguards', ['vanguards'])
+-        try:
+-            subprocess.check_call('vanguards')
+-        except subprocess.CalledProcessError as e:
+-            logging.error(str(e))
+-        finally:
+-            logging.error('Vanguards has exited, killing tor...')
+-            os.kill(1, 2)
+-
+-    def resolve_control_hostname(self):
+-        try:
+-            addr = socket.getaddrinfo(self.control_ip_binding,
+-                                      None,
+-                                      socket.AF_INET,
+-                                      socket.SOCK_STREAM,
+-                                      socket.IPPROTO_TCP)
+-        except socket.gaierror:
+-            raise
+-        return IP(addr[0][4][0])
+-
+-    def resolve_control_port(self):
+-        if 'TOR_CONTROL_PORT' not in os.environ:
+-            return
+-        self._parse_control_port_variable(check_ip=False)
+-        if self.control_socket:
+-            print(os.environ['TOR_CONTROL_PORT'])
+-        try:
+-            ip = IP(self.control_ip_binding)
+-        except ValueError:
+-            ip = self.resolve_control_hostname()
+-        print(f"{ip}:{self.control_port}")
+-
+-    def setup_hosts(self):
+-        self.setup = {}
+-        self._get_setup_from_env()
+-        self._get_setup_from_links()
+-        self._load_keys_in_services()
+-        self.check_services()
+-        self._setup_vanguards()
+-        self._setup_control_port()
+-        self.apply_conf()
+-
+-    def check_services(self):
+-        to_remove = set()
+-        for group in self.services:
+-            try:
+-                for service in group.services:
+-                    if not service.ports:
+-                        raise Exception(
+-                            'Service {name} has not ports set'.format(
+-                                name=service.host
+-                            )
+-                        )
+-                    if len(group.services) > 1 and [
+-                        True for p in service.ports if p.is_socket
+-                    ]:
+-                        raise Exception(
+-                            f'Cannot use socket and ports '
+-                            f'in the same {service.host}'
+-                        )
+-                if len(set(dict(group)['urls'])) != len(dict(group)['urls']):
+-                    raise Exception(
+-                        f'Same port for multiple services in '
+-                        f'{group.name} group'
+-                    )
+-            except Exception as e:
+-                logging.error(e)
+-                to_remove.add(group)
+-        for group in to_remove:
+-            self.services.remove(group)
+-
+-
+-class Onions(Setup):
+-    """Onions"""
+-
+-    def __init__(self):
+-        self.services = []
+-        if 'HIDDEN_SERVICE_DIR' in os.environ:
+-            self.hidden_service_dir = os.environ['HIDDEN_SERVICE_DIR']
+-        if os.environ.get('TOR_DATA_DIRECTORY'):
+-            self.data_directory = os.environ['TOR_DATA_DIRECTORY']
+-
+-    def torrc_parser(self):
+-
+-        self.torrc_dict = {}
+-
+-        def parse_dir(line):
+-            _, path = line.split()
+-            group_name = os.path.basename(path)
+-            self.torrc_dict[group_name] = {
+-                'services': [],
+-            }
+-            return group_name
+-
+-        def parse_port(line, name):
+-            _, port_from, dest = line.split()
+-            service_host, port = dest.split(':')
+-            ports_str = '{port_from}:{dest}'
+-            ports_param = ports_str.format(port_from=port_from,
+-                                           dest=port)
+-            if port.startswith('/'):
+-                service_host = name
+-                ports_param = ports_str.format(port_from=port_from,
+-                                               dest=dest)
+-            self.torrc_dict[name]['services'].append({
+-                'host': service_host,
+-                'ports': ports_param,
+-            })
+-
+-        def parse_version(line, name):
+-            _, version = line.split()
+-            self.torrc_dict[name]['version'] = int(version)
+-
+-        def setup_services():
+-            for name, setup in self.torrc_dict.items():
+-                version = setup.get('version', 3)
+-                group = (self.find_group_by_name(name)
+-                         or self.add_empty_group(name, version=version))
+-                for service_dict in setup.get('services', []):
+-                    host = service_dict['host']
+-                    service = (group.get_service_by_host(host)
+-                               or Service(host))
+-                    service.add_ports(service_dict['ports'])
+-                    if service not in group.services:
+-                        group.add_service(service)
+-            self._load_keys_in_services(secret=False)
+-
+-        if not os.path.exists(self.torrc):
+-            return
+-        try:
+-            with open(self.torrc, 'r') as f:
+-                for line in f.readlines():
+-                    if line.startswith('HiddenServiceDir'):
+-                        name = parse_dir(line)
+-                    if line.startswith('HiddenServicePort'):
+-                        parse_port(line, name)
+-                    if line.startswith('HiddenServiceVersion'):
+-                        parse_version(line, name)
+-        except BaseException:
+-            raise Exception(
+-                'Fail to parse torrc file. Please check the file'
+-            )
+-        setup_services()
+-
+-    def __str__(self):
+-        if not self.services:
+-            return 'No onion site'
+-        return '\n'.join([str(service) for service in self.services])
+-
+-    def to_json(self):
+-        service_lst = [dict(service) for service in self.services]
+-        return dumps({
+-            service['name']: service['urls'] for service in service_lst
+-        })
+-
+-
+-def main():
+-    logging.basicConfig()
+-    parser = argparse.ArgumentParser(description='Display onion sites',
+-                                     prog='onions')
+-    parser.add_argument('--json', dest='json', action='store_true',
+-                        help='serialize to json')
+-
+-    parser.add_argument('--setup-hosts', dest='setup', action='store_true',
+-                        help='Setup hosts')
+-
+-    parser.add_argument('--run-vanguards', dest='vanguards',
+-                        action='store_true',
+-                        help='Run Vanguards in tor container')
+-    parser.add_argument('--resolve-control-port', dest='resolve_control_port',
+-                        action='store_true',
+-                        help='Resolve ip from host if needed')
+-
+-    args = parser.parse_args()
+-    logging.getLogger().setLevel(logging.WARNING)
+-    try:
+-        onions = Onions()
+-        if args.vanguards:
+-            onions.run_vanguards()
+-            return
+-        if args.resolve_control_port:
+-            onions.resolve_control_port()
+-            return
+-        if args.setup:
+-            onions.setup_hosts()
+-        else:
+-            onions.torrc_parser()
+-    except BaseException as e:
+-        logging.exception(e)
+-        error_msg = str(e)
+-    else:
+-        error_msg = None
+-    if args.json:
+-        if error_msg:
+-            print(dumps({'error': error_msg}))
+-            sys.exit(1)
+-        print(onions.to_json())
+-    else:
+-        if error_msg:
+-            logging.error(error_msg)
+-            sys.exit(1)
+-        print(onions)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/onions/Service.py b/onions/Service.py
+deleted file mode 100644
+index e3e77e4..0000000
+--- a/onions/Service.py
++++ /dev/null
+@@ -1,186 +0,0 @@
+-'This class define a service link'
+-import logging
+-import os
+-import pathlib
+-import re
+-
+-from pytor import OnionV3
+-from pytor.onion import EmptyDirException
+-
+-
+-class ServicesGroup(object):
+-
+-    name = None
+-    version = None
+-    imported_key = False
+-    _default_version = 3
+-    _onion = None
+-    _hidden_service_dir = "/var/lib/tor/hidden_service/"
+-
+-    def __init__(self,
+-                 name=None,
+-                 service=None,
+-                 version=None,
+-                 hidden_service_dir=None):
+-
+-        name_regex = r'^[a-zA-Z0-9-_]+$'
+-
+-        self.onion_map = {
+-            3: OnionV3,
+-        }
+-
+-        if not name and not service:
+-            raise Exception(
+-                'Init service group with a name or service at least'
+-            )
+-        self.services = []
+-        self.name = name or service.host
+-        if hidden_service_dir:
+-            self._hidden_service_dir = hidden_service_dir
+-        if not re.match(name_regex, self.name):
+-            raise Exception(
+-                'Group {name} has invalid name'.format(name=self.name)
+-            )
+-        if service:
+-            self.add_service(service)
+-        self.set_version(version or self._default_version)
+-        self.gen_key()
+-
+-    def set_version(self, version):
+-        version = int(version)
+-        if version not in self.onion_map:
+-            raise Exception(
+-                f'Url version {version} is not supported'
+-            )
+-        self.version = version
+-        self._onion = self.onion_map[version]()
+-
+-    @property
+-    def hidden_service_dir(self):
+-        return os.path.join(self._hidden_service_dir, self.name)
+-
+-    def add_service(self, service):
+-        if service not in self.services:
+-            if self.get_service_by_host(service.host):
+-                raise Exception('Duplicate service name')
+-            self.services.append(service)
+-
+-    def get_service_by_host(self, host):
+-        for service in self.services:
+-            if host == service.host:
+-                return service
+-
+-    def add_key(self, key):
+-        if self.imported_key:
+-            logging.warning('Secret key already set, overriding')
+-        if isinstance(key, str):
+-            key = key.encode('ascii')
+-        self._onion.set_private_key(key)
+-        self.imported_key = True
+-
+-    def __iter__(self):
+-        yield 'name', self.name
+-        yield 'onion', self.onion_url
+-        yield 'urls', list(self.urls)
+-        yield 'version', self.version
+-
+-    def __str__(self):
+-        return '{name}: {urls}'.format(name=self.name,
+-                                       urls=', '.join(self.urls))
+-
+-    @property
+-    def onion_url(self):
+-        return self._onion.onion_hostname
+-
+-    @property
+-    def urls(self):
+-        for service in self.services:
+-            for ports in service.ports:
+-                yield '{onion}:{port}'.format(onion=self.onion_url,
+-                                              port=ports.port_from)
+-
+-    def write_key(self, hidden_service_dir=None):
+-        'Write key on disk and set tor service'
+-        if not hidden_service_dir:
+-            hidden_service_dir = self.hidden_service_dir
+-        if not os.path.isdir(hidden_service_dir):
+-            pathlib.Path(hidden_service_dir).mkdir(parents=True)
+-        self._onion.write_hidden_service(hidden_service_dir, force=True)
+-
+-    def _load_key(self, key_file):
+-        with open(key_file, 'rb') as f:
+-            self._onion.set_private_key_from_file(f)
+-
+-    def load_key(self, override=False, secret=True):
+-        if self.imported_key and not override:
+-            return
+-        if secret:
+-            self.load_key_from_secrets()
+-        self.load_key_from_conf()
+-
+-    def load_key_from_secrets(self):
+-        'Load key from docker secret using service name'
+-        secret_file = os.path.join('/run/secrets', self.name)
+-        if not os.path.exists(secret_file):
+-            return
+-        try:
+-            self._load_key(secret_file)
+-            self.imported_key = True
+-        except BaseException as e:
+-            logging.exception(e)
+-            logging.warning('Fail to load key from secret, '
+-                            'check the key or secret name collision')
+-
+-    def load_key_from_conf(self, hidden_service_dir=None):
+-        'Load key from disk if exists'
+-        if not hidden_service_dir:
+-            hidden_service_dir = self.hidden_service_dir
+-        if not os.path.isdir(hidden_service_dir):
+-            return
+-        try:
+-            self._onion.load_hidden_service(hidden_service_dir)
+-            self.imported_key = True
+-        except EmptyDirException:
+-            pass
+-
+-    def gen_key(self):
+-        self.imported_key = False
+-        return self._onion.gen_new_private_key()
+-
+-    @property
+-    def _priv_key(self):
+-        return self._onion.get_private_key()
+-
+-
+-class Ports:
+-
+-    port_from = None
+-    dest = None
+-
+-    def __init__(self, port_from, dest):
+-        self.port_from = int(port_from)
+-        self.dest = dest if dest.startswith('unix:') else int(dest)
+-
+-    @property
+-    def is_socket(self):
+-        return self.dest and type(self.dest) is not int
+-
+-    def __iter__(self):
+-        yield 'port_from', str(self.port_from)
+-        yield 'dest', str(self.dest)
+-        yield 'is_socket', self.is_socket
+-
+-
+-class Service:
+-
+-    def __init__(self, host):
+-        self.host = host
+-        self.ports = []
+-
+-    def add_ports(self, ports):
+-        p = [Ports(*sp.split(':', 1)) for sp in ports.split(',')]
+-        self.ports.extend(p)
+-
+-    def __iter__(self):
+-        yield 'host', self.host
+-        yield 'ports', [dict(p) for p in self.ports]
+diff --git a/onions/__init__.py b/onions/__init__.py
+deleted file mode 100644
+index d3b0b70..0000000
+--- a/onions/__init__.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-from .Onions import main
+-from .Onions import Onions
+-from .Service import Ports
+-from .Service import Service
+-from .Service import ServicesGroup
+diff --git a/poetry.lock b/poetry.lock
+deleted file mode 100644
+index b04fb34..0000000
+--- a/poetry.lock
++++ /dev/null
+@@ -1,1285 +0,0 @@
+-[[package]]
+-name = "appdirs"
+-version = "1.4.4"
+-description = "A small Python module for determining appropriate platform-specific dirs, e.g. a \"user data dir\"."
+-category = "dev"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "astroid"
+-version = "2.13.2"
+-description = "An abstract syntax tree for Python with inference support."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7.2"
+-
+-[package.dependencies]
+-lazy-object-proxy = ">=1.4.0"
+-typing-extensions = ">=4.0.0"
+-wrapt = {version = ">=1.11,<2", markers = "python_version < \"3.11\""}
+-
+-[[package]]
+-name = "attrs"
+-version = "22.2.0"
+-description = "Classes Without Boilerplate"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.extras]
+-cov = ["attrs", "coverage-enable-subprocess", "coverage[toml] (>=5.3)"]
+-dev = ["attrs"]
+-docs = ["furo", "sphinx", "myst-parser", "zope.interface", "sphinx-notfound-page", "sphinxcontrib-towncrier", "towncrier"]
+-tests = ["attrs", "zope.interface"]
+-tests-no-zope = ["hypothesis", "pympler", "pytest (>=4.3.0)", "pytest-xdist", "cloudpickle", "mypy (>=0.971,<0.990)", "pytest-mypy-plugins"]
+-tests_no_zope = ["hypothesis", "pympler", "pytest (>=4.3.0)", "pytest-xdist", "cloudpickle", "mypy (>=0.971,<0.990)", "pytest-mypy-plugins"]
+-
+-[[package]]
+-name = "autopep8"
+-version = "2.0.1"
+-description = "A tool that automatically formats Python code to conform to the PEP 8 style guide"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-pycodestyle = ">=2.10.0"
+-tomli = {version = "*", markers = "python_version < \"3.11\""}
+-
+-[[package]]
+-name = "black"
+-version = "22.12.0"
+-description = "The uncompromising code formatter."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-click = ">=8.0.0"
+-mypy-extensions = ">=0.4.3"
+-pathspec = ">=0.9.0"
+-platformdirs = ">=2"
+-tomli = {version = ">=1.1.0", markers = "python_full_version < \"3.11.0a7\""}
+-
+-[package.extras]
+-colorama = ["colorama (>=0.4.3)"]
+-d = ["aiohttp (>=3.7.4)"]
+-jupyter = ["ipython (>=7.8.0)", "tokenize-rt (>=3.2.0)"]
+-uvloop = ["uvloop (>=0.15.2)"]
+-
+-[[package]]
+-name = "cachetools"
+-version = "5.2.0"
+-description = "Extensible memoizing collections and decorators"
+-category = "dev"
+-optional = false
+-python-versions = "~=3.7"
+-
+-[[package]]
+-name = "cffi"
+-version = "1.15.1"
+-description = "Foreign Function Interface for Python calling C code."
+-category = "dev"
+-optional = false
+-python-versions = "*"
+-
+-[package.dependencies]
+-pycparser = "*"
+-
+-[[package]]
+-name = "cfgv"
+-version = "3.3.1"
+-description = "Validate configuration and produce human readable error messages."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6.1"
+-
+-[[package]]
+-name = "chardet"
+-version = "5.1.0"
+-description = "Universal encoding detector for Python 3"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "click"
+-version = "8.1.3"
+-description = "Composable command line interface toolkit"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-colorama = {version = "*", markers = "platform_system == \"Windows\""}
+-
+-[[package]]
+-name = "colorama"
+-version = "0.4.6"
+-description = "Cross-platform colored terminal text."
+-category = "main"
+-optional = false
+-python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
+-
+-[[package]]
+-name = "colorlog"
+-version = "6.7.0"
+-description = "Add colours to the output of Python's logging module."
+-category = "main"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-colorama = {version = "*", markers = "sys_platform == \"win32\""}
+-
+-[package.extras]
+-development = ["black", "flake8", "mypy", "pytest", "types-colorama"]
+-
+-[[package]]
+-name = "cryptography"
+-version = "39.0.0"
+-description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-cffi = ">=1.12"
+-
+-[package.extras]
+-docs = ["sphinx (>=1.6.5,!=1.8.0,!=3.1.0,!=3.1.1,!=5.2.0,!=5.2.0.post0)", "sphinx-rtd-theme"]
+-docstest = ["pyenchant (>=1.6.11)", "twine (>=1.12.0)", "sphinxcontrib-spelling (>=4.0.1)"]
+-pep8test = ["black", "ruff"]
+-sdist = ["setuptools-rust (>=0.11.4)"]
+-ssh = ["bcrypt (>=3.1.5)"]
+-test = ["pytest (>=6.2.0)", "pytest-benchmark", "pytest-cov", "pytest-subtests", "pytest-xdist", "pretend", "iso8601", "pytz", "hypothesis (>=1.11.4,!=3.79.2)"]
+-
+-[[package]]
+-name = "dill"
+-version = "0.3.6"
+-description = "serialize all of python"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-graph = ["objgraph (>=1.7.2)"]
+-
+-[[package]]
+-name = "distlib"
+-version = "0.3.6"
+-description = "Distribution utilities"
+-category = "dev"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "exceptiongroup"
+-version = "1.1.0"
+-description = "Backport of PEP 654 (exception groups)"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-test = ["pytest (>=6)"]
+-
+-[[package]]
+-name = "filelock"
+-version = "3.9.0"
+-description = "A platform independent file lock."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-docs = ["furo (>=2022.12.7)", "sphinx-autodoc-typehints (>=1.19.5)", "sphinx (>=5.3)"]
+-testing = ["covdefaults (>=2.2.2)", "coverage (>=7.0.1)", "pytest-cov (>=4)", "pytest-timeout (>=2.1)", "pytest (>=7.2)"]
+-
+-[[package]]
+-name = "fire"
+-version = "0.5.0"
+-description = "A library for automatically generating command line interfaces."
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[package.dependencies]
+-six = "*"
+-termcolor = "*"
+-
+-[[package]]
+-name = "identify"
+-version = "2.5.12"
+-description = "File identification library for Python"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-license = ["ukkonen"]
+-
+-[[package]]
+-name = "importlib-metadata"
+-version = "6.0.0"
+-description = "Read metadata from Python packages"
+-category = "main"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-zipp = ">=0.5"
+-
+-[package.extras]
+-docs = ["sphinx (>=3.5)", "jaraco.packaging (>=9)", "rst.linker (>=1.9)", "furo", "sphinx-lint", "jaraco.tidelift (>=1.4)"]
+-perf = ["ipython"]
+-testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "flake8 (<5)", "pytest-cov", "pytest-enabler (>=1.3)", "packaging", "pyfakefs", "flufl.flake8", "pytest-perf (>=0.9.2)", "pytest-black (>=0.3.7)", "pytest-mypy (>=0.9.1)", "pytest-flake8", "importlib-resources (>=1.3)"]
+-
+-[[package]]
+-name = "iniconfig"
+-version = "2.0.0"
+-description = "brain-dead simple config-ini parsing"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "ipaddress"
+-version = "1.0.23"
+-description = "IPv4/IPv6 manipulation library"
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "ipy"
+-version = "1.01"
+-description = "Class and tools for handling of IPv4 and IPv6 addresses and networks"
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "isort"
+-version = "5.11.4"
+-description = "A Python utility / library to sort Python imports."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7.0"
+-
+-[package.extras]
+-colors = ["colorama (>=0.4.3,<0.5.0)"]
+-requirements-deprecated-finder = ["pip-api", "pipreqs"]
+-pipfile-deprecated-finder = ["pipreqs", "requirementslib"]
+-plugins = ["setuptools"]
+-
+-[[package]]
+-name = "jedi"
+-version = "0.18.2"
+-description = "An autocompletion tool for Python that can be used for text editors."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-parso = ">=0.8.0,<0.9.0"
+-
+-[package.extras]
+-docs = ["Jinja2 (==2.11.3)", "MarkupSafe (==1.1.1)", "Pygments (==2.8.1)", "alabaster (==0.7.12)", "babel (==2.9.1)", "chardet (==4.0.0)", "commonmark (==0.8.1)", "docutils (==0.17.1)", "future (==0.18.2)", "idna (==2.10)", "imagesize (==1.2.0)", "mock (==1.0.1)", "packaging (==20.9)", "pyparsing (==2.4.7)", "pytz (==2021.1)", "readthedocs-sphinx-ext (==2.1.4)", "recommonmark (==0.5.0)", "requests (==2.25.1)", "six (==1.15.0)", "snowballstemmer (==2.1.0)", "sphinx-rtd-theme (==0.4.3)", "sphinx (==1.8.5)", "sphinxcontrib-serializinghtml (==1.1.4)", "sphinxcontrib-websupport (==1.2.4)", "urllib3 (==1.26.4)"]
+-qa = ["flake8 (==3.8.3)", "mypy (==0.782)"]
+-testing = ["Django (<3.1)", "attrs", "colorama", "docopt", "pytest (<7.0.0)"]
+-
+-[[package]]
+-name = "jinja2"
+-version = "3.1.2"
+-description = "A very fast and expressive template engine."
+-category = "main"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-MarkupSafe = ">=2.0"
+-
+-[package.extras]
+-i18n = ["Babel (>=2.7)"]
+-
+-[[package]]
+-name = "lazy-object-proxy"
+-version = "1.9.0"
+-description = "A fast and thorough lazy object proxy."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "markupsafe"
+-version = "2.1.1"
+-description = "Safely add untrusted strings to HTML/XML markup."
+-category = "main"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "mccabe"
+-version = "0.7.0"
+-description = "McCabe checker, plugin for flake8"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[[package]]
+-name = "mypy-extensions"
+-version = "0.4.3"
+-description = "Experimental type system extensions for programs checked with the mypy typechecker."
+-category = "dev"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "nodeenv"
+-version = "1.7.0"
+-description = "Node.js virtual environment builder"
+-category = "dev"
+-optional = false
+-python-versions = ">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*"
+-
+-[[package]]
+-name = "packaging"
+-version = "23.0"
+-description = "Core utilities for Python packages"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "parso"
+-version = "0.8.3"
+-description = "A Python Parser"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.extras]
+-qa = ["flake8 (==3.8.3)", "mypy (==0.782)"]
+-testing = ["docopt", "pytest (<6.0.0)"]
+-
+-[[package]]
+-name = "pathspec"
+-version = "0.10.3"
+-description = "Utility library for gitignore style pattern matching of file paths."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "pathtools"
+-version = "0.1.2"
+-description = "File system general utilities"
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "platformdirs"
+-version = "2.6.2"
+-description = "A small Python package for determining appropriate platform-specific dirs, e.g. a \"user data dir\"."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-docs = ["furo (>=2022.12.7)", "proselint (>=0.13)", "sphinx-autodoc-typehints (>=1.19.5)", "sphinx (>=5.3)"]
+-test = ["appdirs (==1.4.4)", "covdefaults (>=2.2.2)", "pytest-cov (>=4)", "pytest-mock (>=3.10)", "pytest (>=7.2)"]
+-
+-[[package]]
+-name = "pluggy"
+-version = "1.0.0"
+-description = "plugin and hook calling mechanisms for python"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.extras]
+-testing = ["pytest-benchmark", "pytest"]
+-dev = ["tox", "pre-commit"]
+-
+-[[package]]
+-name = "pre-commit"
+-version = "2.21.0"
+-description = "A framework for managing and maintaining multi-language pre-commit hooks."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-cfgv = ">=2.0.0"
+-identify = ">=1.0.0"
+-nodeenv = ">=0.11.1"
+-pyyaml = ">=5.1"
+-virtualenv = ">=20.10.0"
+-
+-[[package]]
+-name = "prompt-toolkit"
+-version = "3.0.36"
+-description = "Library for building powerful interactive command lines in Python"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6.2"
+-
+-[package.dependencies]
+-wcwidth = "*"
+-
+-[[package]]
+-name = "ptpython"
+-version = "3.0.22"
+-description = "Python REPL build on top of prompt_toolkit"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-appdirs = "*"
+-jedi = ">=0.16.0"
+-prompt-toolkit = ">=3.0.18,<3.1.0"
+-pygments = "*"
+-
+-[package.extras]
+-all = ["black"]
+-ptipython = ["ipython"]
+-
+-[[package]]
+-name = "pycodestyle"
+-version = "2.10.0"
+-description = "Python style guide checker"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[[package]]
+-name = "pycparser"
+-version = "2.21"
+-description = "C parser in Python"
+-category = "dev"
+-optional = false
+-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+-
+-[[package]]
+-name = "pycryptodome"
+-version = "3.16.0"
+-description = "Cryptographic library for Python"
+-category = "main"
+-optional = false
+-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+-
+-[[package]]
+-name = "pyentrypoint"
+-version = "0.8.0"
+-description = "pyentrypoint manages entrypoints in Docker containers."
+-category = "main"
+-optional = false
+-python-versions = ">=3.8.0,<3.11"
+-
+-[package.dependencies]
+-colorlog = "*"
+-jinja2 = "*"
+-pyyaml = "*"
+-six = "*"
+-toml = "*"
+-watchdog = ">=0.10,<0.11"
+-
+-[[package]]
+-name = "pyfakefs"
+-version = "5.0.0"
+-description = "pyfakefs implements a fake file system that mocks the Python file system modules."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "pygments"
+-version = "2.14.0"
+-description = "Pygments is a syntax highlighting package written in Python."
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.extras]
+-plugins = ["importlib-metadata"]
+-
+-[[package]]
+-name = "pylint"
+-version = "2.15.9"
+-description = "python code static checker"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7.2"
+-
+-[package.dependencies]
+-astroid = ">=2.12.13,<=2.14.0-dev0"
+-colorama = {version = ">=0.4.5", markers = "sys_platform == \"win32\""}
+-dill = {version = ">=0.2", markers = "python_version < \"3.11\""}
+-isort = ">=4.2.5,<6"
+-mccabe = ">=0.6,<0.8"
+-platformdirs = ">=2.2.0"
+-tomli = {version = ">=1.1.0", markers = "python_version < \"3.11\""}
+-tomlkit = ">=0.10.1"
+-
+-[package.extras]
+-spelling = ["pyenchant (>=3.2,<4.0)"]
+-testutils = ["gitpython (>3)"]
+-
+-[[package]]
+-name = "pyproject-api"
+-version = "1.4.0"
+-description = "API to interact with the python pyproject.toml based projects"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-packaging = ">=21.3"
+-tomli = {version = ">=2.0.1", markers = "python_version < \"3.11\""}
+-
+-[package.extras]
+-docs = ["furo (>=2022.9.29)", "sphinx-autodoc-typehints (>=1.19.5)", "sphinx (>=5.3)"]
+-testing = ["covdefaults (>=2.2.2)", "importlib-metadata (>=5.1)", "pytest-cov (>=4)", "pytest-mock (>=3.10)", "pytest (>=7.2)", "virtualenv (>=20.17)", "wheel (>=0.38.4)"]
+-
+-[[package]]
+-name = "pytest"
+-version = "7.2.0"
+-description = "pytest: simple powerful testing with Python"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-attrs = ">=19.2.0"
+-colorama = {version = "*", markers = "sys_platform == \"win32\""}
+-exceptiongroup = {version = ">=1.0.0rc8", markers = "python_version < \"3.11\""}
+-iniconfig = "*"
+-packaging = "*"
+-pluggy = ">=0.12,<2.0"
+-tomli = {version = ">=1.0.0", markers = "python_version < \"3.11\""}
+-
+-[package.extras]
+-testing = ["argcomplete", "hypothesis (>=3.56)", "mock", "nose", "pygments (>=2.7.2)", "requests", "xmlschema"]
+-
+-[[package]]
+-name = "pytor"
+-version = "0.1.9"
+-description = "Manage Tor hidden services keys"
+-category = "main"
+-optional = false
+-python-versions = ">=3.6.12,<3.11"
+-
+-[package.dependencies]
+-fire = ">=0.3.1"
+-pycryptodome = ">=3.9.4"
+-pyyaml = ">=5.3.1"
+-
+-[[package]]
+-name = "pyyaml"
+-version = "6.0"
+-description = "YAML parser and emitter for Python"
+-category = "main"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[[package]]
+-name = "six"
+-version = "1.16.0"
+-description = "Python 2 and 3 compatibility utilities"
+-category = "main"
+-optional = false
+-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
+-
+-[[package]]
+-name = "stem"
+-version = "1.8.1"
+-description = "Stem is a Python controller library that allows applications to interact with Tor (https://www.torproject.org/)."
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "termcolor"
+-version = "2.2.0"
+-description = "ANSI color formatting for output in terminal"
+-category = "main"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-tests = ["pytest", "pytest-cov"]
+-
+-[[package]]
+-name = "toml"
+-version = "0.10.2"
+-description = "Python Library for Tom's Obvious, Minimal Language"
+-category = "main"
+-optional = false
+-python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
+-
+-[[package]]
+-name = "tomli"
+-version = "2.0.1"
+-description = "A lil' TOML parser"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "tomlkit"
+-version = "0.11.6"
+-description = "Style preserving TOML library"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[[package]]
+-name = "tox"
+-version = "4.2.6"
+-description = "tox is a generic virtualenv management and test command line tool"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.dependencies]
+-cachetools = ">=5.2"
+-chardet = ">=5.1"
+-colorama = ">=0.4.6"
+-filelock = ">=3.9"
+-packaging = ">=22"
+-platformdirs = ">=2.6.2"
+-pluggy = ">=1"
+-pyproject-api = ">=1.2.1"
+-tomli = {version = ">=2.0.1", markers = "python_version < \"3.11\""}
+-virtualenv = ">=20.17.1"
+-
+-[package.extras]
+-docs = ["furo (>=2022.12.7)", "sphinx-argparse-cli (>=1.10)", "sphinx-autodoc-typehints (>=1.19.5)", "sphinx-copybutton (>=0.5.1)", "sphinx-inline-tabs (>=2022.1.2b11)", "sphinx (>=6)", "sphinxcontrib-towncrier (>=0.2.1a0)", "towncrier (>=22.12)"]
+-testing = ["build[virtualenv] (>=0.9)", "covdefaults (>=2.2.2)", "devpi-process (>=0.3)", "diff-cover (>=7.3)", "distlib (>=0.3.6)", "flaky (>=3.7)", "hatch-vcs (>=0.3)", "hatchling (>=1.12)", "psutil (>=5.9.4)", "pytest-cov (>=4)", "pytest-mock (>=3.10)", "pytest-xdist (>=3.1)", "pytest (>=7.2)", "re-assert (>=1.1)", "time-machine (>=2.8.2)"]
+-
+-[[package]]
+-name = "typing-extensions"
+-version = "4.4.0"
+-description = "Backported and Experimental Type Hints for Python 3.7+"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[[package]]
+-name = "vanguards"
+-version = "0.3.1"
+-description = "Vanguards help guard you from getting vanned..."
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[package.dependencies]
+-ipaddress = ">=1.0.17"
+-stem = ">=1.7.0"
+-
+-[[package]]
+-name = "virtualenv"
+-version = "20.17.1"
+-description = "Virtual Python Environment builder"
+-category = "dev"
+-optional = false
+-python-versions = ">=3.6"
+-
+-[package.dependencies]
+-distlib = ">=0.3.6,<1"
+-filelock = ">=3.4.1,<4"
+-platformdirs = ">=2.4,<3"
+-
+-[package.extras]
+-docs = ["proselint (>=0.13)", "sphinx (>=5.3)", "sphinx-argparse (>=0.3.2)", "sphinx-rtd-theme (>=1)", "towncrier (>=22.8)"]
+-testing = ["coverage (>=6.2)", "coverage-enable-subprocess (>=1)", "flaky (>=3.7)", "packaging (>=21.3)", "pytest (>=7.0.1)", "pytest-env (>=0.6.2)", "pytest-freezegun (>=0.4.2)", "pytest-mock (>=3.6.1)", "pytest-randomly (>=3.10.3)", "pytest-timeout (>=2.1)"]
+-
+-[[package]]
+-name = "watchdog"
+-version = "0.10.4"
+-description = "Filesystem events monitoring"
+-category = "main"
+-optional = false
+-python-versions = "*"
+-
+-[package.dependencies]
+-pathtools = ">=0.1.1"
+-
+-[package.extras]
+-watchmedo = ["PyYAML (>=3.10)", "argh (>=0.24.1)"]
+-
+-[[package]]
+-name = "wcwidth"
+-version = "0.2.5"
+-description = "Measures the displayed width of unicode strings in a terminal"
+-category = "dev"
+-optional = false
+-python-versions = "*"
+-
+-[[package]]
+-name = "wrapt"
+-version = "1.14.1"
+-description = "Module for decorators, wrappers and monkey patching."
+-category = "dev"
+-optional = false
+-python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,>=2.7"
+-
+-[[package]]
+-name = "zipp"
+-version = "3.11.0"
+-description = "Backport of pathlib-compatible object wrapper for zip files"
+-category = "main"
+-optional = false
+-python-versions = ">=3.7"
+-
+-[package.extras]
+-docs = ["sphinx (>=3.5)", "jaraco.packaging (>=9)", "rst.linker (>=1.9)", "furo", "jaraco.tidelift (>=1.4)"]
+-testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "flake8 (<5)", "pytest-cov", "pytest-enabler (>=1.3)", "jaraco.itertools", "func-timeout", "jaraco.functools", "more-itertools", "pytest-black (>=0.3.7)", "pytest-mypy (>=0.9.1)", "pytest-flake8"]
+-
+-[metadata]
+-lock-version = "1.1"
+-python-versions = ">=3.10,<3.11"
+-content-hash = "36c0058037c95211518d11eab3681a27a2f6e4314b40a7122715e8c741499989"
+-
+-[metadata.files]
+-appdirs = [
+-    {file = "appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128"},
+-    {file = "appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41"},
+-]
+-astroid = [
+-    {file = "astroid-2.13.2-py3-none-any.whl", hash = "sha256:8f6a8d40c4ad161d6fc419545ae4b2f275ed86d1c989c97825772120842ee0d2"},
+-    {file = "astroid-2.13.2.tar.gz", hash = "sha256:3bc7834720e1a24ca797fd785d77efb14f7a28ee8e635ef040b6e2d80ccb3303"},
+-]
+-attrs = [
+-    {file = "attrs-22.2.0-py3-none-any.whl", hash = "sha256:29e95c7f6778868dbd49170f98f8818f78f3dc5e0e37c0b1f474e3561b240836"},
+-    {file = "attrs-22.2.0.tar.gz", hash = "sha256:c9227bfc2f01993c03f68db37d1d15c9690188323c067c641f1a35ca58185f99"},
+-]
+-autopep8 = [
+-    {file = "autopep8-2.0.1-py2.py3-none-any.whl", hash = "sha256:be5bc98c33515b67475420b7b1feafc8d32c1a69862498eda4983b45bffd2687"},
+-    {file = "autopep8-2.0.1.tar.gz", hash = "sha256:d27a8929d8dcd21c0f4b3859d2d07c6c25273727b98afc984c039df0f0d86566"},
+-]
+-black = [
+-    {file = "black-22.12.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9eedd20838bd5d75b80c9f5487dbcb06836a43833a37846cf1d8c1cc01cef59d"},
+-    {file = "black-22.12.0-cp310-cp310-win_amd64.whl", hash = "sha256:159a46a4947f73387b4d83e87ea006dbb2337eab6c879620a3ba52699b1f4351"},
+-    {file = "black-22.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d30b212bffeb1e252b31dd269dfae69dd17e06d92b87ad26e23890f3efea366f"},
+-    {file = "black-22.12.0-cp311-cp311-win_amd64.whl", hash = "sha256:7412e75863aa5c5411886804678b7d083c7c28421210180d67dfd8cf1221e1f4"},
+-    {file = "black-22.12.0-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c116eed0efb9ff870ded8b62fe9f28dd61ef6e9ddd28d83d7d264a38417dcee2"},
+-    {file = "black-22.12.0-cp37-cp37m-win_amd64.whl", hash = "sha256:1f58cbe16dfe8c12b7434e50ff889fa479072096d79f0a7f25e4ab8e94cd8350"},
+-    {file = "black-22.12.0-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:77d86c9f3db9b1bf6761244bc0b3572a546f5fe37917a044e02f3166d5aafa7d"},
+-    {file = "black-22.12.0-cp38-cp38-win_amd64.whl", hash = "sha256:82d9fe8fee3401e02e79767016b4907820a7dc28d70d137eb397b92ef3cc5bfc"},
+-    {file = "black-22.12.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:101c69b23df9b44247bd88e1d7e90154336ac4992502d4197bdac35dd7ee3320"},
+-    {file = "black-22.12.0-cp39-cp39-win_amd64.whl", hash = "sha256:559c7a1ba9a006226f09e4916060982fd27334ae1998e7a38b3f33a37f7a2148"},
+-    {file = "black-22.12.0-py3-none-any.whl", hash = "sha256:436cc9167dd28040ad90d3b404aec22cedf24a6e4d7de221bec2730ec0c97bcf"},
+-    {file = "black-22.12.0.tar.gz", hash = "sha256:229351e5a18ca30f447bf724d007f890f97e13af070bb6ad4c0a441cd7596a2f"},
+-]
+-cachetools = [
+-    {file = "cachetools-5.2.0-py3-none-any.whl", hash = "sha256:f9f17d2aec496a9aa6b76f53e3b614c965223c061982d434d160f930c698a9db"},
+-    {file = "cachetools-5.2.0.tar.gz", hash = "sha256:6a94c6402995a99c3970cc7e4884bb60b4a8639938157eeed436098bf9831757"},
+-]
+-cffi = [
+-    {file = "cffi-1.15.1-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:a66d3508133af6e8548451b25058d5812812ec3798c886bf38ed24a98216fab2"},
+-    {file = "cffi-1.15.1-cp27-cp27m-manylinux1_i686.whl", hash = "sha256:470c103ae716238bbe698d67ad020e1db9d9dba34fa5a899b5e21577e6d52ed2"},
+-    {file = "cffi-1.15.1-cp27-cp27m-manylinux1_x86_64.whl", hash = "sha256:9ad5db27f9cabae298d151c85cf2bad1d359a1b9c686a275df03385758e2f914"},
+-    {file = "cffi-1.15.1-cp27-cp27m-win32.whl", hash = "sha256:b3bbeb01c2b273cca1e1e0c5df57f12dce9a4dd331b4fa1635b8bec26350bde3"},
+-    {file = "cffi-1.15.1-cp27-cp27m-win_amd64.whl", hash = "sha256:e00b098126fd45523dd056d2efba6c5a63b71ffe9f2bbe1a4fe1716e1d0c331e"},
+-    {file = "cffi-1.15.1-cp27-cp27mu-manylinux1_i686.whl", hash = "sha256:d61f4695e6c866a23a21acab0509af1cdfd2c013cf256bbf5b6b5e2695827162"},
+-    {file = "cffi-1.15.1-cp27-cp27mu-manylinux1_x86_64.whl", hash = "sha256:ed9cb427ba5504c1dc15ede7d516b84757c3e3d7868ccc85121d9310d27eed0b"},
+-    {file = "cffi-1.15.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:39d39875251ca8f612b6f33e6b1195af86d1b3e60086068be9cc053aa4376e21"},
+-    {file = "cffi-1.15.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:285d29981935eb726a4399badae8f0ffdff4f5050eaa6d0cfc3f64b857b77185"},
+-    {file = "cffi-1.15.1-cp310-cp310-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3eb6971dcff08619f8d91607cfc726518b6fa2a9eba42856be181c6d0d9515fd"},
+-    {file = "cffi-1.15.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:21157295583fe8943475029ed5abdcf71eb3911894724e360acff1d61c1d54bc"},
+-    {file = "cffi-1.15.1-cp310-cp310-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:5635bd9cb9731e6d4a1132a498dd34f764034a8ce60cef4f5319c0541159392f"},
+-    {file = "cffi-1.15.1-cp310-cp310-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:2012c72d854c2d03e45d06ae57f40d78e5770d252f195b93f581acf3ba44496e"},
+-    {file = "cffi-1.15.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:dd86c085fae2efd48ac91dd7ccffcfc0571387fe1193d33b6394db7ef31fe2a4"},
+-    {file = "cffi-1.15.1-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:fa6693661a4c91757f4412306191b6dc88c1703f780c8234035eac011922bc01"},
+-    {file = "cffi-1.15.1-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:59c0b02d0a6c384d453fece7566d1c7e6b7bae4fc5874ef2ef46d56776d61c9e"},
+-    {file = "cffi-1.15.1-cp310-cp310-win32.whl", hash = "sha256:cba9d6b9a7d64d4bd46167096fc9d2f835e25d7e4c121fb2ddfc6528fb0413b2"},
+-    {file = "cffi-1.15.1-cp310-cp310-win_amd64.whl", hash = "sha256:ce4bcc037df4fc5e3d184794f27bdaab018943698f4ca31630bc7f84a7b69c6d"},
+-    {file = "cffi-1.15.1-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:3d08afd128ddaa624a48cf2b859afef385b720bb4b43df214f85616922e6a5ac"},
+-    {file = "cffi-1.15.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:3799aecf2e17cf585d977b780ce79ff0dc9b78d799fc694221ce814c2c19db83"},
+-    {file = "cffi-1.15.1-cp311-cp311-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:a591fe9e525846e4d154205572a029f653ada1a78b93697f3b5a8f1f2bc055b9"},
+-    {file = "cffi-1.15.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3548db281cd7d2561c9ad9984681c95f7b0e38881201e157833a2342c30d5e8c"},
+-    {file = "cffi-1.15.1-cp311-cp311-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:91fc98adde3d7881af9b59ed0294046f3806221863722ba7d8d120c575314325"},
+-    {file = "cffi-1.15.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:94411f22c3985acaec6f83c6df553f2dbe17b698cc7f8ae751ff2237d96b9e3c"},
+-    {file = "cffi-1.15.1-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:03425bdae262c76aad70202debd780501fabeaca237cdfddc008987c0e0f59ef"},
+-    {file = "cffi-1.15.1-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:cc4d65aeeaa04136a12677d3dd0b1c0c94dc43abac5860ab33cceb42b801c1e8"},
+-    {file = "cffi-1.15.1-cp311-cp311-win32.whl", hash = "sha256:a0f100c8912c114ff53e1202d0078b425bee3649ae34d7b070e9697f93c5d52d"},
+-    {file = "cffi-1.15.1-cp311-cp311-win_amd64.whl", hash = "sha256:04ed324bda3cda42b9b695d51bb7d54b680b9719cfab04227cdd1e04e5de3104"},
+-    {file = "cffi-1.15.1-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:50a74364d85fd319352182ef59c5c790484a336f6db772c1a9231f1c3ed0cbd7"},
+-    {file = "cffi-1.15.1-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e263d77ee3dd201c3a142934a086a4450861778baaeeb45db4591ef65550b0a6"},
+-    {file = "cffi-1.15.1-cp36-cp36m-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:cec7d9412a9102bdc577382c3929b337320c4c4c4849f2c5cdd14d7368c5562d"},
+-    {file = "cffi-1.15.1-cp36-cp36m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:4289fc34b2f5316fbb762d75362931e351941fa95fa18789191b33fc4cf9504a"},
+-    {file = "cffi-1.15.1-cp36-cp36m-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:173379135477dc8cac4bc58f45db08ab45d228b3363adb7af79436135d028405"},
+-    {file = "cffi-1.15.1-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:6975a3fac6bc83c4a65c9f9fcab9e47019a11d3d2cf7f3c0d03431bf145a941e"},
+-    {file = "cffi-1.15.1-cp36-cp36m-win32.whl", hash = "sha256:2470043b93ff09bf8fb1d46d1cb756ce6132c54826661a32d4e4d132e1977adf"},
+-    {file = "cffi-1.15.1-cp36-cp36m-win_amd64.whl", hash = "sha256:30d78fbc8ebf9c92c9b7823ee18eb92f2e6ef79b45ac84db507f52fbe3ec4497"},
+-    {file = "cffi-1.15.1-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:198caafb44239b60e252492445da556afafc7d1e3ab7a1fb3f0584ef6d742375"},
+-    {file = "cffi-1.15.1-cp37-cp37m-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:5ef34d190326c3b1f822a5b7a45f6c4535e2f47ed06fec77d3d799c450b2651e"},
+-    {file = "cffi-1.15.1-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8102eaf27e1e448db915d08afa8b41d6c7ca7a04b7d73af6514df10a3e74bd82"},
+-    {file = "cffi-1.15.1-cp37-cp37m-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:5df2768244d19ab7f60546d0c7c63ce1581f7af8b5de3eb3004b9b6fc8a9f84b"},
+-    {file = "cffi-1.15.1-cp37-cp37m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:a8c4917bd7ad33e8eb21e9a5bbba979b49d9a97acb3a803092cbc1133e20343c"},
+-    {file = "cffi-1.15.1-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e2642fe3142e4cc4af0799748233ad6da94c62a8bec3a6648bf8ee68b1c7426"},
+-    {file = "cffi-1.15.1-cp37-cp37m-win32.whl", hash = "sha256:e229a521186c75c8ad9490854fd8bbdd9a0c9aa3a524326b55be83b54d4e0ad9"},
+-    {file = "cffi-1.15.1-cp37-cp37m-win_amd64.whl", hash = "sha256:a0b71b1b8fbf2b96e41c4d990244165e2c9be83d54962a9a1d118fd8657d2045"},
+-    {file = "cffi-1.15.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:320dab6e7cb2eacdf0e658569d2575c4dad258c0fcc794f46215e1e39f90f2c3"},
+-    {file = "cffi-1.15.1-cp38-cp38-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:1e74c6b51a9ed6589199c787bf5f9875612ca4a8a0785fb2d4a84429badaf22a"},
+-    {file = "cffi-1.15.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a5c84c68147988265e60416b57fc83425a78058853509c1b0629c180094904a5"},
+-    {file = "cffi-1.15.1-cp38-cp38-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:3b926aa83d1edb5aa5b427b4053dc420ec295a08e40911296b9eb1b6170f6cca"},
+-    {file = "cffi-1.15.1-cp38-cp38-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:87c450779d0914f2861b8526e035c5e6da0a3199d8f1add1a665e1cbc6fc6d02"},
+-    {file = "cffi-1.15.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4f2c9f67e9821cad2e5f480bc8d83b8742896f1242dba247911072d4fa94c192"},
+-    {file = "cffi-1.15.1-cp38-cp38-win32.whl", hash = "sha256:8b7ee99e510d7b66cdb6c593f21c043c248537a32e0bedf02e01e9553a172314"},
+-    {file = "cffi-1.15.1-cp38-cp38-win_amd64.whl", hash = "sha256:00a9ed42e88df81ffae7a8ab6d9356b371399b91dbdf0c3cb1e84c03a13aceb5"},
+-    {file = "cffi-1.15.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:54a2db7b78338edd780e7ef7f9f6c442500fb0d41a5a4ea24fff1c929d5af585"},
+-    {file = "cffi-1.15.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:fcd131dd944808b5bdb38e6f5b53013c5aa4f334c5cad0c72742f6eba4b73db0"},
+-    {file = "cffi-1.15.1-cp39-cp39-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:7473e861101c9e72452f9bf8acb984947aa1661a7704553a9f6e4baa5ba64415"},
+-    {file = "cffi-1.15.1-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6c9a799e985904922a4d207a94eae35c78ebae90e128f0c4e521ce339396be9d"},
+-    {file = "cffi-1.15.1-cp39-cp39-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:3bcde07039e586f91b45c88f8583ea7cf7a0770df3a1649627bf598332cb6984"},
+-    {file = "cffi-1.15.1-cp39-cp39-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:33ab79603146aace82c2427da5ca6e58f2b3f2fb5da893ceac0c42218a40be35"},
+-    {file = "cffi-1.15.1-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5d598b938678ebf3c67377cdd45e09d431369c3b1a5b331058c338e201f12b27"},
+-    {file = "cffi-1.15.1-cp39-cp39-musllinux_1_1_i686.whl", hash = "sha256:db0fbb9c62743ce59a9ff687eb5f4afbe77e5e8403d6697f7446e5f609976f76"},
+-    {file = "cffi-1.15.1-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:98d85c6a2bef81588d9227dde12db8a7f47f639f4a17c9ae08e773aa9c697bf3"},
+-    {file = "cffi-1.15.1-cp39-cp39-win32.whl", hash = "sha256:40f4774f5a9d4f5e344f31a32b5096977b5d48560c5592e2f3d2c4374bd543ee"},
+-    {file = "cffi-1.15.1-cp39-cp39-win_amd64.whl", hash = "sha256:70df4e3b545a17496c9b3f41f5115e69a4f2e77e94e1d2a8e1070bc0c38c8a3c"},
+-    {file = "cffi-1.15.1.tar.gz", hash = "sha256:d400bfb9a37b1351253cb402671cea7e89bdecc294e8016a707f6d1d8ac934f9"},
+-]
+-cfgv = [
+-    {file = "cfgv-3.3.1-py2.py3-none-any.whl", hash = "sha256:c6a0883f3917a037485059700b9e75da2464e6c27051014ad85ba6aaa5884426"},
+-    {file = "cfgv-3.3.1.tar.gz", hash = "sha256:f5a830efb9ce7a445376bb66ec94c638a9787422f96264c98edc6bdeed8ab736"},
+-]
+-chardet = [
+-    {file = "chardet-5.1.0-py3-none-any.whl", hash = "sha256:362777fb014af596ad31334fde1e8c327dfdb076e1960d1694662d46a6917ab9"},
+-    {file = "chardet-5.1.0.tar.gz", hash = "sha256:0d62712b956bc154f85fb0a266e2a3c5913c2967e00348701b32411d6def31e5"},
+-]
+-click = [
+-    {file = "click-8.1.3-py3-none-any.whl", hash = "sha256:bb4d8133cb15a609f44e8213d9b391b0809795062913b383c62be0ee95b1db48"},
+-    {file = "click-8.1.3.tar.gz", hash = "sha256:7682dc8afb30297001674575ea00d1814d808d6a36af415a82bd481d37ba7b8e"},
+-]
+-colorama = [
+-    {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
+-    {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
+-]
+-colorlog = [
+-    {file = "colorlog-6.7.0-py2.py3-none-any.whl", hash = "sha256:0d33ca236784a1ba3ff9c532d4964126d8a2c44f1f0cb1d2b0728196f512f662"},
+-    {file = "colorlog-6.7.0.tar.gz", hash = "sha256:bd94bd21c1e13fac7bd3153f4bc3a7dc0eb0974b8bc2fdf1a989e474f6e582e5"},
+-]
+-cryptography = [
+-    {file = "cryptography-39.0.0-cp36-abi3-macosx_10_12_universal2.whl", hash = "sha256:c52a1a6f81e738d07f43dab57831c29e57d21c81a942f4602fac7ee21b27f288"},
+-    {file = "cryptography-39.0.0-cp36-abi3-macosx_10_12_x86_64.whl", hash = "sha256:80ee674c08aaef194bc4627b7f2956e5ba7ef29c3cc3ca488cf15854838a8f72"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.manylinux_2_24_aarch64.whl", hash = "sha256:887cbc1ea60786e534b00ba8b04d1095f4272d380ebd5f7a7eb4cc274710fad9"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6f97109336df5c178ee7c9c711b264c502b905c2d2a29ace99ed761533a3460f"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1a6915075c6d3a5e1215eab5d99bcec0da26036ff2102a1038401d6ef5bef25b"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_24_x86_64.whl", hash = "sha256:76c24dd4fd196a80f9f2f5405a778a8ca132f16b10af113474005635fe7e066c"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:bae6c7f4a36a25291b619ad064a30a07110a805d08dc89984f4f441f6c1f3f96"},
+-    {file = "cryptography-39.0.0-cp36-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:875aea1039d78557c7c6b4db2fe0e9d2413439f4676310a5f269dd342ca7a717"},
+-    {file = "cryptography-39.0.0-cp36-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:f6c0db08d81ead9576c4d94bbb27aed8d7a430fa27890f39084c2d0e2ec6b0df"},
+-    {file = "cryptography-39.0.0-cp36-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:f3ed2d864a2fa1666e749fe52fb8e23d8e06b8012e8bd8147c73797c506e86f1"},
+-    {file = "cryptography-39.0.0-cp36-abi3-win32.whl", hash = "sha256:f671c1bb0d6088e94d61d80c606d65baacc0d374e67bf895148883461cd848de"},
+-    {file = "cryptography-39.0.0-cp36-abi3-win_amd64.whl", hash = "sha256:e324de6972b151f99dc078defe8fb1b0a82c6498e37bff335f5bc6b1e3ab5a1e"},
+-    {file = "cryptography-39.0.0-pp38-pypy38_pp73-macosx_10_12_x86_64.whl", hash = "sha256:754978da4d0457e7ca176f58c57b1f9de6556591c19b25b8bcce3c77d314f5eb"},
+-    {file = "cryptography-39.0.0-pp38-pypy38_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1ee1fd0de9851ff32dbbb9362a4d833b579b4a6cc96883e8e6d2ff2a6bc7104f"},
+-    {file = "cryptography-39.0.0-pp38-pypy38_pp73-manylinux_2_24_x86_64.whl", hash = "sha256:fec8b932f51ae245121c4671b4bbc030880f363354b2f0e0bd1366017d891458"},
+-    {file = "cryptography-39.0.0-pp38-pypy38_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:407cec680e811b4fc829de966f88a7c62a596faa250fc1a4b520a0355b9bc190"},
+-    {file = "cryptography-39.0.0-pp38-pypy38_pp73-win_amd64.whl", hash = "sha256:7dacfdeee048814563eaaec7c4743c8aea529fe3dd53127313a792f0dadc1773"},
+-    {file = "cryptography-39.0.0-pp39-pypy39_pp73-macosx_10_12_x86_64.whl", hash = "sha256:ad04f413436b0781f20c52a661660f1e23bcd89a0e9bb1d6d20822d048cf2856"},
+-    {file = "cryptography-39.0.0-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:50386acb40fbabbceeb2986332f0287f50f29ccf1497bae31cf5c3e7b4f4b34f"},
+-    {file = "cryptography-39.0.0-pp39-pypy39_pp73-manylinux_2_24_x86_64.whl", hash = "sha256:e5d71c5d5bd5b5c3eebcf7c5c2bb332d62ec68921a8c593bea8c394911a005ce"},
+-    {file = "cryptography-39.0.0-pp39-pypy39_pp73-manylinux_2_28_x86_64.whl", hash = "sha256:844ad4d7c3850081dffba91cdd91950038ee4ac525c575509a42d3fc806b83c8"},
+-    {file = "cryptography-39.0.0-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:e0a05aee6a82d944f9b4edd6a001178787d1546ec7c6223ee9a848a7ade92e39"},
+-    {file = "cryptography-39.0.0.tar.gz", hash = "sha256:f964c7dcf7802d133e8dbd1565914fa0194f9d683d82411989889ecd701e8adf"},
+-]
+-dill = [
+-    {file = "dill-0.3.6-py3-none-any.whl", hash = "sha256:a07ffd2351b8c678dfc4a856a3005f8067aea51d6ba6c700796a4d9e280f39f0"},
+-    {file = "dill-0.3.6.tar.gz", hash = "sha256:e5db55f3687856d8fbdab002ed78544e1c4559a130302693d839dfe8f93f2373"},
+-]
+-distlib = [
+-    {file = "distlib-0.3.6-py2.py3-none-any.whl", hash = "sha256:f35c4b692542ca110de7ef0bea44d73981caeb34ca0b9b6b2e6d7790dda8f80e"},
+-    {file = "distlib-0.3.6.tar.gz", hash = "sha256:14bad2d9b04d3a36127ac97f30b12a19268f211063d8f8ee4f47108896e11b46"},
+-]
+-exceptiongroup = [
+-    {file = "exceptiongroup-1.1.0-py3-none-any.whl", hash = "sha256:327cbda3da756e2de031a3107b81ab7b3770a602c4d16ca618298c526f4bec1e"},
+-    {file = "exceptiongroup-1.1.0.tar.gz", hash = "sha256:bcb67d800a4497e1b404c2dd44fca47d3b7a5e5433dbab67f96c1a685cdfdf23"},
+-]
+-filelock = [
+-    {file = "filelock-3.9.0-py3-none-any.whl", hash = "sha256:f58d535af89bb9ad5cd4df046f741f8553a418c01a7856bf0d173bbc9f6bd16d"},
+-    {file = "filelock-3.9.0.tar.gz", hash = "sha256:7b319f24340b51f55a2bf7a12ac0755a9b03e718311dac567a0f4f7fabd2f5de"},
+-]
+-fire = [
+-    {file = "fire-0.5.0.tar.gz", hash = "sha256:a6b0d49e98c8963910021f92bba66f65ab440da2982b78eb1bbf95a0a34aacc6"},
+-]
+-identify = [
+-    {file = "identify-2.5.12-py2.py3-none-any.whl", hash = "sha256:e8a400c3062d980243d27ce10455a52832205649bbcaf27ffddb3dfaaf477bad"},
+-    {file = "identify-2.5.12.tar.gz", hash = "sha256:0bc96b09c838310b6fcfcc61f78a981ea07f94836ef6ef553da5bb5d4745d662"},
+-]
+-importlib-metadata = [
+-    {file = "importlib_metadata-6.0.0-py3-none-any.whl", hash = "sha256:7efb448ec9a5e313a57655d35aa54cd3e01b7e1fbcf72dce1bf06119420f5bad"},
+-    {file = "importlib_metadata-6.0.0.tar.gz", hash = "sha256:e354bedeb60efa6affdcc8ae121b73544a7aa74156d047311948f6d711cd378d"},
+-]
+-iniconfig = [
+-    {file = "iniconfig-2.0.0-py3-none-any.whl", hash = "sha256:b6a85871a79d2e3b22d2d1b94ac2824226a63c6b741c88f7ae975f18b6778374"},
+-    {file = "iniconfig-2.0.0.tar.gz", hash = "sha256:2d91e135bf72d31a410b17c16da610a82cb55f6b0477d1a902134b24a455b8b3"},
+-]
+-ipaddress = [
+-    {file = "ipaddress-1.0.23-py2.py3-none-any.whl", hash = "sha256:6e0f4a39e66cb5bb9a137b00276a2eff74f93b71dcbdad6f10ff7df9d3557fcc"},
+-    {file = "ipaddress-1.0.23.tar.gz", hash = "sha256:b7f8e0369580bb4a24d5ba1d7cc29660a4a6987763faf1d8a8046830e020e7e2"},
+-]
+-ipy = [
+-    {file = "IPy-1.01.tar.gz", hash = "sha256:edeca741dea2d54aca568fa23740288c3fe86c0f3ea700344571e9ef14a7cc1a"},
+-]
+-isort = [
+-    {file = "isort-5.11.4-py3-none-any.whl", hash = "sha256:c033fd0edb91000a7f09527fe5c75321878f98322a77ddcc81adbd83724afb7b"},
+-    {file = "isort-5.11.4.tar.gz", hash = "sha256:6db30c5ded9815d813932c04c2f85a360bcdd35fed496f4d8f35495ef0a261b6"},
+-]
+-jedi = [
+-    {file = "jedi-0.18.2-py2.py3-none-any.whl", hash = "sha256:203c1fd9d969ab8f2119ec0a3342e0b49910045abe6af0a3ae83a5764d54639e"},
+-    {file = "jedi-0.18.2.tar.gz", hash = "sha256:bae794c30d07f6d910d32a7048af09b5a39ed740918da923c6b780790ebac612"},
+-]
+-jinja2 = [
+-    {file = "Jinja2-3.1.2-py3-none-any.whl", hash = "sha256:6088930bfe239f0e6710546ab9c19c9ef35e29792895fed6e6e31a023a182a61"},
+-    {file = "Jinja2-3.1.2.tar.gz", hash = "sha256:31351a702a408a9e7595a8fc6150fc3f43bb6bf7e319770cbc0db9df9437e852"},
+-]
+-lazy-object-proxy = [
+-    {file = "lazy-object-proxy-1.9.0.tar.gz", hash = "sha256:659fb5809fa4629b8a1ac5106f669cfc7bef26fbb389dda53b3e010d1ac4ebae"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b40387277b0ed2d0602b8293b94d7257e17d1479e257b4de114ea11a8cb7f2d7"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e8c6cfb338b133fbdbc5cfaa10fe3c6aeea827db80c978dbd13bc9dd8526b7d4"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:721532711daa7db0d8b779b0bb0318fa87af1c10d7fe5e52ef30f8eff254d0cd"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:66a3de4a3ec06cd8af3f61b8e1ec67614fbb7c995d02fa224813cb7afefee701"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:1aa3de4088c89a1b69f8ec0dcc169aa725b0ff017899ac568fe44ddc1396df46"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-win32.whl", hash = "sha256:f0705c376533ed2a9e5e97aacdbfe04cecd71e0aa84c7c0595d02ef93b6e4455"},
+-    {file = "lazy_object_proxy-1.9.0-cp310-cp310-win_amd64.whl", hash = "sha256:ea806fd4c37bf7e7ad82537b0757999264d5f70c45468447bb2b91afdbe73a6e"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:946d27deaff6cf8452ed0dba83ba38839a87f4f7a9732e8f9fd4107b21e6ff07"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:79a31b086e7e68b24b99b23d57723ef7e2c6d81ed21007b6281ebcd1688acb0a"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f699ac1c768270c9e384e4cbd268d6e67aebcfae6cd623b4d7c3bfde5a35db59"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:bfb38f9ffb53b942f2b5954e0f610f1e721ccebe9cce9025a38c8ccf4a5183a4"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:189bbd5d41ae7a498397287c408617fe5c48633e7755287b21d741f7db2706a9"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-win32.whl", hash = "sha256:81fc4d08b062b535d95c9ea70dbe8a335c45c04029878e62d744bdced5141586"},
+-    {file = "lazy_object_proxy-1.9.0-cp311-cp311-win_amd64.whl", hash = "sha256:f2457189d8257dd41ae9b434ba33298aec198e30adf2dcdaaa3a28b9994f6adb"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:d9e25ef10a39e8afe59a5c348a4dbf29b4868ab76269f81ce1674494e2565a6e"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cbf9b082426036e19c6924a9ce90c740a9861e2bdc27a4834fd0a910742ac1e8"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9f5fa4a61ce2438267163891961cfd5e32ec97a2c444e5b842d574251ade27d2"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-musllinux_1_1_aarch64.whl", hash = "sha256:8fa02eaab317b1e9e03f69aab1f91e120e7899b392c4fc19807a8278a07a97e8"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-musllinux_1_1_x86_64.whl", hash = "sha256:e7c21c95cae3c05c14aafffe2865bbd5e377cfc1348c4f7751d9dc9a48ca4bda"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-win32.whl", hash = "sha256:f12ad7126ae0c98d601a7ee504c1122bcef553d1d5e0c3bfa77b16b3968d2734"},
+-    {file = "lazy_object_proxy-1.9.0-cp37-cp37m-win_amd64.whl", hash = "sha256:edd20c5a55acb67c7ed471fa2b5fb66cb17f61430b7a6b9c3b4a1e40293b1671"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:2d0daa332786cf3bb49e10dc6a17a52f6a8f9601b4cf5c295a4f85854d61de63"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9cd077f3d04a58e83d04b20e334f678c2b0ff9879b9375ed107d5d07ff160171"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:660c94ea760b3ce47d1855a30984c78327500493d396eac4dfd8bd82041b22be"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-musllinux_1_1_aarch64.whl", hash = "sha256:212774e4dfa851e74d393a2370871e174d7ff0ebc980907723bb67d25c8a7c30"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:f0117049dd1d5635bbff65444496c90e0baa48ea405125c088e93d9cf4525b11"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-win32.whl", hash = "sha256:0a891e4e41b54fd5b8313b96399f8b0e173bbbfc03c7631f01efbe29bb0bcf82"},
+-    {file = "lazy_object_proxy-1.9.0-cp38-cp38-win_amd64.whl", hash = "sha256:9990d8e71b9f6488e91ad25f322898c136b008d87bf852ff65391b004da5e17b"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:9e7551208b2aded9c1447453ee366f1c4070602b3d932ace044715d89666899b"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5f83ac4d83ef0ab017683d715ed356e30dd48a93746309c8f3517e1287523ef4"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7322c3d6f1766d4ef1e51a465f47955f1e8123caee67dd641e67d539a534d006"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-musllinux_1_1_aarch64.whl", hash = "sha256:18b78ec83edbbeb69efdc0e9c1cb41a3b1b1ed11ddd8ded602464c3fc6020494"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:09763491ce220c0299688940f8dc2c5d05fd1f45af1e42e636b2e8b2303e4382"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-win32.whl", hash = "sha256:9090d8e53235aa280fc9239a86ae3ea8ac58eff66a705fa6aa2ec4968b95c821"},
+-    {file = "lazy_object_proxy-1.9.0-cp39-cp39-win_amd64.whl", hash = "sha256:db1c1722726f47e10e0b5fdbf15ac3b8adb58c091d12b3ab713965795036985f"},
+-]
+-markupsafe = [
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:86b1f75c4e7c2ac2ccdaec2b9022845dbb81880ca318bb7a0a01fbf7813e3812"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:f121a1420d4e173a5d96e47e9a0c0dcff965afdf1626d28de1460815f7c4ee7a"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a49907dd8420c5685cfa064a1335b6754b74541bbb3706c259c02ed65b644b3e"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:10c1bfff05d95783da83491be968e8fe789263689c02724e0c691933c52994f5"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:b7bd98b796e2b6553da7225aeb61f447f80a1ca64f41d83612e6139ca5213aa4"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:b09bf97215625a311f669476f44b8b318b075847b49316d3e28c08e41a7a573f"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:694deca8d702d5db21ec83983ce0bb4b26a578e71fbdbd4fdcd387daa90e4d5e"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:efc1913fd2ca4f334418481c7e595c00aad186563bbc1ec76067848c7ca0a933"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-win32.whl", hash = "sha256:4a33dea2b688b3190ee12bd7cfa29d39c9ed176bda40bfa11099a3ce5d3a7ac6"},
+-    {file = "MarkupSafe-2.1.1-cp310-cp310-win_amd64.whl", hash = "sha256:dda30ba7e87fbbb7eab1ec9f58678558fd9a6b8b853530e176eabd064da81417"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:671cd1187ed5e62818414afe79ed29da836dde67166a9fac6d435873c44fdd02"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:3799351e2336dc91ea70b034983ee71cf2f9533cdff7c14c90ea126bfd95d65a"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e72591e9ecd94d7feb70c1cbd7be7b3ebea3f548870aa91e2732960fa4d57a37"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:6fbf47b5d3728c6aea2abb0589b5d30459e369baa772e0f37a0320185e87c980"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-musllinux_1_1_aarch64.whl", hash = "sha256:d5ee4f386140395a2c818d149221149c54849dfcfcb9f1debfe07a8b8bd63f9a"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-musllinux_1_1_i686.whl", hash = "sha256:bcb3ed405ed3222f9904899563d6fc492ff75cce56cba05e32eff40e6acbeaa3"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-musllinux_1_1_x86_64.whl", hash = "sha256:e1c0b87e09fa55a220f058d1d49d3fb8df88fbfab58558f1198e08c1e1de842a"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-win32.whl", hash = "sha256:8dc1c72a69aa7e082593c4a203dcf94ddb74bb5c8a731e4e1eb68d031e8498ff"},
+-    {file = "MarkupSafe-2.1.1-cp37-cp37m-win_amd64.whl", hash = "sha256:97a68e6ada378df82bc9f16b800ab77cbf4b2fada0081794318520138c088e4a"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-macosx_10_9_universal2.whl", hash = "sha256:e8c843bbcda3a2f1e3c2ab25913c80a3c5376cd00c6e8c4a86a89a28c8dc5452"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:0212a68688482dc52b2d45013df70d169f542b7394fc744c02a57374a4207003"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8e576a51ad59e4bfaac456023a78f6b5e6e7651dcd383bcc3e18d06f9b55d6d1"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4b9fe39a2ccc108a4accc2676e77da025ce383c108593d65cc909add5c3bd601"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:96e37a3dc86e80bf81758c152fe66dbf60ed5eca3d26305edf01892257049925"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-musllinux_1_1_aarch64.whl", hash = "sha256:6d0072fea50feec76a4c418096652f2c3238eaa014b2f94aeb1d56a66b41403f"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-musllinux_1_1_i686.whl", hash = "sha256:089cf3dbf0cd6c100f02945abeb18484bd1ee57a079aefd52cffd17fba910b88"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:6a074d34ee7a5ce3effbc526b7083ec9731bb3cbf921bbe1d3005d4d2bdb3a63"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-win32.whl", hash = "sha256:421be9fbf0ffe9ffd7a378aafebbf6f4602d564d34be190fc19a193232fd12b1"},
+-    {file = "MarkupSafe-2.1.1-cp38-cp38-win_amd64.whl", hash = "sha256:fc7b548b17d238737688817ab67deebb30e8073c95749d55538ed473130ec0c7"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:e04e26803c9c3851c931eac40c695602c6295b8d432cbe78609649ad9bd2da8a"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:b87db4360013327109564f0e591bd2a3b318547bcef31b468a92ee504d07ae4f"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:99a2a507ed3ac881b975a2976d59f38c19386d128e7a9a18b7df6fff1fd4c1d6"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:56442863ed2b06d19c37f94d999035e15ee982988920e12a5b4ba29b62ad1f77"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3ce11ee3f23f79dbd06fb3d63e2f6af7b12db1d46932fe7bd8afa259a5996603"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-musllinux_1_1_aarch64.whl", hash = "sha256:33b74d289bd2f5e527beadcaa3f401e0df0a89927c1559c8566c066fa4248ab7"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-musllinux_1_1_i686.whl", hash = "sha256:43093fb83d8343aac0b1baa75516da6092f58f41200907ef92448ecab8825135"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:8e3dcf21f367459434c18e71b2a9532d96547aef8a871872a5bd69a715c15f96"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-win32.whl", hash = "sha256:d4306c36ca495956b6d568d276ac11fdd9c30a36f1b6eb928070dc5360b22e1c"},
+-    {file = "MarkupSafe-2.1.1-cp39-cp39-win_amd64.whl", hash = "sha256:46d00d6cfecdde84d40e572d63735ef81423ad31184100411e6e3388d405e247"},
+-    {file = "MarkupSafe-2.1.1.tar.gz", hash = "sha256:7f91197cc9e48f989d12e4e6fbc46495c446636dfc81b9ccf50bb0ec74b91d4b"},
+-]
+-mccabe = [
+-    {file = "mccabe-0.7.0-py2.py3-none-any.whl", hash = "sha256:6c2d30ab6be0e4a46919781807b4f0d834ebdd6c6e3dca0bda5a15f863427b6e"},
+-    {file = "mccabe-0.7.0.tar.gz", hash = "sha256:348e0240c33b60bbdf4e523192ef919f28cb2c3d7d5c7794f74009290f236325"},
+-]
+-mypy-extensions = [
+-    {file = "mypy_extensions-0.4.3-py2.py3-none-any.whl", hash = "sha256:090fedd75945a69ae91ce1303b5824f428daf5a028d2f6ab8a299250a846f15d"},
+-    {file = "mypy_extensions-0.4.3.tar.gz", hash = "sha256:2d82818f5bb3e369420cb3c4060a7970edba416647068eb4c5343488a6c604a8"},
+-]
+-nodeenv = [
+-    {file = "nodeenv-1.7.0-py2.py3-none-any.whl", hash = "sha256:27083a7b96a25f2f5e1d8cb4b6317ee8aeda3bdd121394e5ac54e498028a042e"},
+-    {file = "nodeenv-1.7.0.tar.gz", hash = "sha256:e0e7f7dfb85fc5394c6fe1e8fa98131a2473e04311a45afb6508f7cf1836fa2b"},
+-]
+-packaging = [
+-    {file = "packaging-23.0-py3-none-any.whl", hash = "sha256:714ac14496c3e68c99c29b00845f7a2b85f3bb6f1078fd9f72fd20f0570002b2"},
+-    {file = "packaging-23.0.tar.gz", hash = "sha256:b6ad297f8907de0fa2fe1ccbd26fdaf387f5f47c7275fedf8cce89f99446cf97"},
+-]
+-parso = [
+-    {file = "parso-0.8.3-py2.py3-none-any.whl", hash = "sha256:c001d4636cd3aecdaf33cbb40aebb59b094be2a74c556778ef5576c175e19e75"},
+-    {file = "parso-0.8.3.tar.gz", hash = "sha256:8c07be290bb59f03588915921e29e8a50002acaf2cdc5fa0e0114f91709fafa0"},
+-]
+-pathspec = [
+-    {file = "pathspec-0.10.3-py3-none-any.whl", hash = "sha256:3c95343af8b756205e2aba76e843ba9520a24dd84f68c22b9f93251507509dd6"},
+-    {file = "pathspec-0.10.3.tar.gz", hash = "sha256:56200de4077d9d0791465aa9095a01d421861e405b5096955051deefd697d6f6"},
+-]
+-pathtools = [
+-    {file = "pathtools-0.1.2.tar.gz", hash = "sha256:7c35c5421a39bb82e58018febd90e3b6e5db34c5443aaaf742b3f33d4655f1c0"},
+-]
+-platformdirs = [
+-    {file = "platformdirs-2.6.2-py3-none-any.whl", hash = "sha256:83c8f6d04389165de7c9b6f0c682439697887bca0aa2f1c87ef1826be3584490"},
+-    {file = "platformdirs-2.6.2.tar.gz", hash = "sha256:e1fea1fe471b9ff8332e229df3cb7de4f53eeea4998d3b6bfff542115e998bd2"},
+-]
+-pluggy = [
+-    {file = "pluggy-1.0.0-py2.py3-none-any.whl", hash = "sha256:74134bbf457f031a36d68416e1509f34bd5ccc019f0bcc952c7b909d06b37bd3"},
+-    {file = "pluggy-1.0.0.tar.gz", hash = "sha256:4224373bacce55f955a878bf9cfa763c1e360858e330072059e10bad68531159"},
+-]
+-pre-commit = [
+-    {file = "pre_commit-2.21.0-py2.py3-none-any.whl", hash = "sha256:e2f91727039fc39a92f58a588a25b87f936de6567eed4f0e673e0507edc75bad"},
+-    {file = "pre_commit-2.21.0.tar.gz", hash = "sha256:31ef31af7e474a8d8995027fefdfcf509b5c913ff31f2015b4ec4beb26a6f658"},
+-]
+-prompt-toolkit = [
+-    {file = "prompt_toolkit-3.0.36-py3-none-any.whl", hash = "sha256:aa64ad242a462c5ff0363a7b9cfe696c20d55d9fc60c11fd8e632d064804d305"},
+-    {file = "prompt_toolkit-3.0.36.tar.gz", hash = "sha256:3e163f254bef5a03b146397d7c1963bd3e2812f0964bb9a24e6ec761fd28db63"},
+-]
+-ptpython = [
+-    {file = "ptpython-3.0.22-py2.py3-none-any.whl", hash = "sha256:2b06f28e63b8bfe30736ac07d23c00adb4161c4f0e1c1a26a51344b07e2100bd"},
+-    {file = "ptpython-3.0.22.tar.gz", hash = "sha256:c097b324406014a005c6b09f493bbbdde571e412360af2ba1551873a10c36cf8"},
+-]
+-pycodestyle = [
+-    {file = "pycodestyle-2.10.0-py2.py3-none-any.whl", hash = "sha256:8a4eaf0d0495c7395bdab3589ac2db602797d76207242c17d470186815706610"},
+-    {file = "pycodestyle-2.10.0.tar.gz", hash = "sha256:347187bdb476329d98f695c213d7295a846d1152ff4fe9bacb8a9590b8ee7053"},
+-]
+-pycparser = [
+-    {file = "pycparser-2.21-py2.py3-none-any.whl", hash = "sha256:8ee45429555515e1f6b185e78100aea234072576aa43ab53aefcae078162fca9"},
+-    {file = "pycparser-2.21.tar.gz", hash = "sha256:e644fdec12f7872f86c58ff790da456218b10f863970249516d60a5eaca77206"},
+-]
+-pycryptodome = [
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:e061311b02cefb17ea93d4a5eb1ad36dca4792037078b43e15a653a0a4478ead"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-manylinux2010_i686.whl", hash = "sha256:dab9359cc295160ba96738ba4912c675181c84bfdf413e5c0621cf00b7deeeaa"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-manylinux2010_x86_64.whl", hash = "sha256:0198fe96c22f7bc31e7a7c27a26b2cec5af3cf6075d577295f4850856c77af32"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-manylinux2014_aarch64.whl", hash = "sha256:58172080cbfaee724067a3c017add6a1a3cc167bbc8478dc5f2e5f45fa658763"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-win32.whl", hash = "sha256:4d950ed2a887905b3fa709b86be5a163e26e1b174703ed59d34eb6832f213222"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27m-win_amd64.whl", hash = "sha256:c69e19afc734b2a17b9d78b7bcb544aabd5a52ff628e14283b6e9404d27d0517"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27mu-manylinux2010_i686.whl", hash = "sha256:1fc16c80a5da8231fd1f953a7b8dfeb415f68120248e8d68383c5c2c4b18708c"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27mu-manylinux2010_x86_64.whl", hash = "sha256:5df582f2112dd72331de7e567837e136a9629181a8ab69ef8949e4bc294a0b99"},
+-    {file = "pycryptodome-3.16.0-cp27-cp27mu-manylinux2014_aarch64.whl", hash = "sha256:2bf2a270906a02b7b255e1a0d7b3aea4f06b3983c51ddec1673c380e0dff5b30"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-macosx_10_9_x86_64.whl", hash = "sha256:b12a88566a98617b1a34b4e5a805dff2da98d83fc74262aff3c3d724d0f525d6"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-manylinux2014_aarch64.whl", hash = "sha256:69adf32522b75968e1cbf25b5d83e87c04cd9a55610ce1e4a19012e58e7e4023"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-manylinux_2_5_i686.manylinux1_i686.manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:d67a2d2fe344953e4572a7d30668cceb516b04287b8638170d562065e53ee2e0"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:e750a21d8a265b1f9bfb1a28822995ea33511ba7db5e2b55f41fb30781d0d073"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:47c71a0347847b747ba1349767b16cde049bc36f21654eb09cc82306ef5fdcf8"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-musllinux_1_1_i686.whl", hash = "sha256:856ebf822d08d754af62c22e2b93626509a72773214f92db1551e2b68d9e2a1b"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:6016269bb56caf0327f6d42e7bad1247e08b78407446dff562240c65f85d5a5e"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-win32.whl", hash = "sha256:1047ac2b9847ae84ea454e6e20db7dcb755a81c1b1631a879213d2b0ad835ff2"},
+-    {file = "pycryptodome-3.16.0-cp35-abi3-win_amd64.whl", hash = "sha256:13b3e610a2f8938c61a90b20625069ab7a77ccea20d65a9a0f926cc0cc1314b1"},
+-    {file = "pycryptodome-3.16.0-pp27-pypy_73-macosx_10_9_x86_64.whl", hash = "sha256:265bfcbbf20d58e6871ce695a7a08aac9b41a0553060d9c05363abd6f3391bdd"},
+-    {file = "pycryptodome-3.16.0-pp27-pypy_73-manylinux2010_x86_64.whl", hash = "sha256:54d807314c66785c69cd25425933d4bd4c23547a593cdcf49d962fa3e0081336"},
+-    {file = "pycryptodome-3.16.0-pp27-pypy_73-win32.whl", hash = "sha256:63165fbdc247450017eb9ef04cfe15cb3a72ca48ffcc3a3b75b08c0340bf3647"},
+-    {file = "pycryptodome-3.16.0-pp37-pypy37_pp73-macosx_10_9_x86_64.whl", hash = "sha256:95069fd9e2813668a2713a1efcc65cc26d2c7e741401ac46628f1ec957511f1b"},
+-    {file = "pycryptodome-3.16.0-pp37-pypy37_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_12_i686.manylinux2010_i686.whl", hash = "sha256:d1daec4d31bb00918e4e178297ac6ca6f86ec4c851ba584770533ece554d29e2"},
+-    {file = "pycryptodome-3.16.0-pp37-pypy37_pp73-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:48d99869d58f3979d72f6fa0c50f48d16f14973bc4a3adb0ce3b8325fdd7e223"},
+-    {file = "pycryptodome-3.16.0-pp37-pypy37_pp73-win_amd64.whl", hash = "sha256:c82e3bc1e70dde153b0956bffe20a15715a1fe3e00bc23e88d6973eda4505944"},
+-    {file = "pycryptodome-3.16.0.tar.gz", hash = "sha256:0e45d2d852a66ecfb904f090c3f87dc0dfb89a499570abad8590f10d9cffb350"},
+-]
+-pyentrypoint = [
+-    {file = "pyentrypoint-0.8.0-py3-none-any.whl", hash = "sha256:082686bf317eddc50c185bade2fca8c6bad307688702454af62bd3895723f58f"},
+-    {file = "pyentrypoint-0.8.0.tar.gz", hash = "sha256:d1d7b195c71bee05e4ae5194f82451c5125f0909f69767e79d80376abb77ec78"},
+-]
+-pyfakefs = [
+-    {file = "pyfakefs-5.0.0-py3-none-any.whl", hash = "sha256:e1b01954978fe2d9a4d75f079359d7f8d3af3bb12ff2dc8633a4cc0a0dc7fbda"},
+-    {file = "pyfakefs-5.0.0.tar.gz", hash = "sha256:19d1d8f1ee520891d78b6ed05c2078e0792d545f83dee33461fbaa5cc72e187d"},
+-]
+-pygments = [
+-    {file = "Pygments-2.14.0-py3-none-any.whl", hash = "sha256:fa7bd7bd2771287c0de303af8bfdfc731f51bd2c6a47ab69d117138893b82717"},
+-    {file = "Pygments-2.14.0.tar.gz", hash = "sha256:b3ed06a9e8ac9a9aae5a6f5dbe78a8a58655d17b43b93c078f094ddc476ae297"},
+-]
+-pylint = [
+-    {file = "pylint-2.15.9-py3-none-any.whl", hash = "sha256:349c8cd36aede4d50a0754a8c0218b43323d13d5d88f4b2952ddfe3e169681eb"},
+-    {file = "pylint-2.15.9.tar.gz", hash = "sha256:18783cca3cfee5b83c6c5d10b3cdb66c6594520ffae61890858fe8d932e1c6b4"},
+-]
+-pyproject-api = [
+-    {file = "pyproject_api-1.4.0-py3-none-any.whl", hash = "sha256:c34226297781efdd1ba4dfb74ce21076d9a8360e2125ea31803c1a02c76b2460"},
+-    {file = "pyproject_api-1.4.0.tar.gz", hash = "sha256:ac85c1f82e0291dbae5a7739dbb9a990e11ee4034c9b5599ea714f07a24ecd71"},
+-]
+-pytest = [
+-    {file = "pytest-7.2.0-py3-none-any.whl", hash = "sha256:892f933d339f068883b6fd5a459f03d85bfcb355e4981e146d2c7616c21fef71"},
+-    {file = "pytest-7.2.0.tar.gz", hash = "sha256:c4014eb40e10f11f355ad4e3c2fb2c6c6d1919c73f3b5a433de4708202cade59"},
+-]
+-pytor = [
+-    {file = "pytor-0.1.9-py3-none-any.whl", hash = "sha256:aba49bc268a6f21e197ddb21c8938f0aebe98b62bd7a6738e463882a91bd2719"},
+-    {file = "pytor-0.1.9.tar.gz", hash = "sha256:7b6c0f076fffef8319157a0fbccf7595d0b8b18dd78d5d7c6031a3807dee2b08"},
+-]
+-pyyaml = [
+-    {file = "PyYAML-6.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:d4db7c7aef085872ef65a8fd7d6d09a14ae91f691dec3e87ee5ee0539d516f53"},
+-    {file = "PyYAML-6.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:9df7ed3b3d2e0ecfe09e14741b857df43adb5a3ddadc919a2d94fbdf78fea53c"},
+-    {file = "PyYAML-6.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:77f396e6ef4c73fdc33a9157446466f1cff553d979bd00ecb64385760c6babdc"},
+-    {file = "PyYAML-6.0-cp310-cp310-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:a80a78046a72361de73f8f395f1f1e49f956c6be882eed58505a15f3e430962b"},
+-    {file = "PyYAML-6.0-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:f84fbc98b019fef2ee9a1cb3ce93e3187a6df0b2538a651bfb890254ba9f90b5"},
+-    {file = "PyYAML-6.0-cp310-cp310-win32.whl", hash = "sha256:2cd5df3de48857ed0544b34e2d40e9fac445930039f3cfe4bcc592a1f836d513"},
+-    {file = "PyYAML-6.0-cp310-cp310-win_amd64.whl", hash = "sha256:daf496c58a8c52083df09b80c860005194014c3698698d1a57cbcfa182142a3a"},
+-    {file = "PyYAML-6.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:897b80890765f037df3403d22bab41627ca8811ae55e9a722fd0392850ec4d86"},
+-    {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:50602afada6d6cbfad699b0c7bb50d5ccffa7e46a3d738092afddc1f9758427f"},
+-    {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:48c346915c114f5fdb3ead70312bd042a953a8ce5c7106d5bfb1a5254e47da92"},
+-    {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:98c4d36e99714e55cfbaaee6dd5badbc9a1ec339ebfc3b1f52e293aee6bb71a4"},
+-    {file = "PyYAML-6.0-cp36-cp36m-win32.whl", hash = "sha256:0283c35a6a9fbf047493e3a0ce8d79ef5030852c51e9d911a27badfde0605293"},
+-    {file = "PyYAML-6.0-cp36-cp36m-win_amd64.whl", hash = "sha256:07751360502caac1c067a8132d150cf3d61339af5691fe9e87803040dbc5db57"},
+-    {file = "PyYAML-6.0-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:819b3830a1543db06c4d4b865e70ded25be52a2e0631ccd2f6a47a2822f2fd7c"},
+-    {file = "PyYAML-6.0-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:473f9edb243cb1935ab5a084eb238d842fb8f404ed2193a915d1784b5a6b5fc0"},
+-    {file = "PyYAML-6.0-cp37-cp37m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:0ce82d761c532fe4ec3f87fc45688bdd3a4c1dc5e0b4a19814b9009a29baefd4"},
+-    {file = "PyYAML-6.0-cp37-cp37m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:231710d57adfd809ef5d34183b8ed1eeae3f76459c18fb4a0b373ad56bedcdd9"},
+-    {file = "PyYAML-6.0-cp37-cp37m-win32.whl", hash = "sha256:c5687b8d43cf58545ade1fe3e055f70eac7a5a1a0bf42824308d868289a95737"},
+-    {file = "PyYAML-6.0-cp37-cp37m-win_amd64.whl", hash = "sha256:d15a181d1ecd0d4270dc32edb46f7cb7733c7c508857278d3d378d14d606db2d"},
+-    {file = "PyYAML-6.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:0b4624f379dab24d3725ffde76559cff63d9ec94e1736b556dacdfebe5ab6d4b"},
+-    {file = "PyYAML-6.0-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:213c60cd50106436cc818accf5baa1aba61c0189ff610f64f4a3e8c6726218ba"},
+-    {file = "PyYAML-6.0-cp38-cp38-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:9fa600030013c4de8165339db93d182b9431076eb98eb40ee068700c9c813e34"},
+-    {file = "PyYAML-6.0-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:277a0ef2981ca40581a47093e9e2d13b3f1fbbeffae064c1d21bfceba2030287"},
+-    {file = "PyYAML-6.0-cp38-cp38-win32.whl", hash = "sha256:d4eccecf9adf6fbcc6861a38015c2a64f38b9d94838ac1810a9023a0609e1b78"},
+-    {file = "PyYAML-6.0-cp38-cp38-win_amd64.whl", hash = "sha256:1e4747bc279b4f613a09eb64bba2ba602d8a6664c6ce6396a4d0cd413a50ce07"},
+-    {file = "PyYAML-6.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:055d937d65826939cb044fc8c9b08889e8c743fdc6a32b33e2390f66013e449b"},
+-    {file = "PyYAML-6.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:e61ceaab6f49fb8bdfaa0f92c4b57bcfbea54c09277b1b4f7ac376bfb7a7c174"},
+-    {file = "PyYAML-6.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d67d839ede4ed1b28a4e8909735fc992a923cdb84e618544973d7dfc71540803"},
+-    {file = "PyYAML-6.0-cp39-cp39-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:cba8c411ef271aa037d7357a2bc8f9ee8b58b9965831d9e51baf703280dc73d3"},
+-    {file = "PyYAML-6.0-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:40527857252b61eacd1d9af500c3337ba8deb8fc298940291486c465c8b46ec0"},
+-    {file = "PyYAML-6.0-cp39-cp39-win32.whl", hash = "sha256:b5b9eccad747aabaaffbc6064800670f0c297e52c12754eb1d976c57e4f74dcb"},
+-    {file = "PyYAML-6.0-cp39-cp39-win_amd64.whl", hash = "sha256:b3d267842bf12586ba6c734f89d1f5b871df0273157918b0ccefa29deb05c21c"},
+-    {file = "PyYAML-6.0.tar.gz", hash = "sha256:68fb519c14306fec9720a2a5b45bc9f0c8d1b9c72adf45c37baedfcd949c35a2"},
+-]
+-six = [
+-    {file = "six-1.16.0-py2.py3-none-any.whl", hash = "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254"},
+-    {file = "six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926"},
+-]
+-stem = [
+-    {file = "stem-1.8.1.tar.gz", hash = "sha256:81d43a7c668ba9d7bc1103b2e7a911e9d148294b373d27a59ae8da79ef7a3e2f"},
+-]
+-termcolor = [
+-    {file = "termcolor-2.2.0-py3-none-any.whl", hash = "sha256:91ddd848e7251200eac969846cbae2dacd7d71c2871e92733289e7e3666f48e7"},
+-    {file = "termcolor-2.2.0.tar.gz", hash = "sha256:dfc8ac3f350788f23b2947b3e6cfa5a53b630b612e6cd8965a015a776020b99a"},
+-]
+-toml = [
+-    {file = "toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b"},
+-    {file = "toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f"},
+-]
+-tomli = [
+-    {file = "tomli-2.0.1-py3-none-any.whl", hash = "sha256:939de3e7a6161af0c887ef91b7d41a53e7c5a1ca976325f429cb46ea9bc30ecc"},
+-    {file = "tomli-2.0.1.tar.gz", hash = "sha256:de526c12914f0c550d15924c62d72abc48d6fe7364aa87328337a31007fe8a4f"},
+-]
+-tomlkit = [
+-    {file = "tomlkit-0.11.6-py3-none-any.whl", hash = "sha256:07de26b0d8cfc18f871aec595fda24d95b08fef89d147caa861939f37230bf4b"},
+-    {file = "tomlkit-0.11.6.tar.gz", hash = "sha256:71b952e5721688937fb02cf9d354dbcf0785066149d2855e44531ebdd2b65d73"},
+-]
+-tox = [
+-    {file = "tox-4.2.6-py3-none-any.whl", hash = "sha256:fb79b3e4b788491949576a9c80c2d56419eac994567c3591e24bb2788b5901d0"},
+-    {file = "tox-4.2.6.tar.gz", hash = "sha256:ecf224a4f3a318adcdd71aa8fe15ffd31f14afd6a9845a43ffd63950a7325538"},
+-]
+-typing-extensions = [
+-    {file = "typing_extensions-4.4.0-py3-none-any.whl", hash = "sha256:16fa4864408f655d35ec496218b85f79b3437c829e93320c7c9215ccfd92489e"},
+-    {file = "typing_extensions-4.4.0.tar.gz", hash = "sha256:1511434bb92bf8dd198c12b1cc812e800d4181cfcb867674e0f8279cc93087aa"},
+-]
+-vanguards = [
+-    {file = "vanguards-0.3.1-py2.py3-none-any.whl", hash = "sha256:ef3751d47263483a040486cff920841e937fdea4f892c1791191dfd8c9f20ebf"},
+-    {file = "vanguards-0.3.1.tar.gz", hash = "sha256:04049fafd433bb747fbe27b404413ce09b441d5e0e6cc5d81debaac2192567b7"},
+-]
+-virtualenv = [
+-    {file = "virtualenv-20.17.1-py3-none-any.whl", hash = "sha256:ce3b1684d6e1a20a3e5ed36795a97dfc6af29bc3970ca8dab93e11ac6094b3c4"},
+-    {file = "virtualenv-20.17.1.tar.gz", hash = "sha256:f8b927684efc6f1cc206c9db297a570ab9ad0e51c16fa9e45487d36d1905c058"},
+-]
+-watchdog = [
+-    {file = "watchdog-0.10.4.tar.gz", hash = "sha256:e38bffc89b15bafe2a131f0e1c74924cf07dcec020c2e0a26cccd208831fcd43"},
+-]
+-wcwidth = [
+-    {file = "wcwidth-0.2.5-py2.py3-none-any.whl", hash = "sha256:beb4802a9cebb9144e99086eff703a642a13d6a0052920003a230f3294bbe784"},
+-    {file = "wcwidth-0.2.5.tar.gz", hash = "sha256:c4d647b99872929fdb7bdcaa4fbe7f01413ed3d98077df798530e5b04f116c83"},
+-]
+-wrapt = [
+-    {file = "wrapt-1.14.1-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:1b376b3f4896e7930f1f772ac4b064ac12598d1c38d04907e696cc4d794b43d3"},
+-    {file = "wrapt-1.14.1-cp27-cp27m-manylinux1_i686.whl", hash = "sha256:903500616422a40a98a5a3c4ff4ed9d0066f3b4c951fa286018ecdf0750194ef"},
+-    {file = "wrapt-1.14.1-cp27-cp27m-manylinux1_x86_64.whl", hash = "sha256:5a9a0d155deafd9448baff28c08e150d9b24ff010e899311ddd63c45c2445e28"},
+-    {file = "wrapt-1.14.1-cp27-cp27m-manylinux2010_i686.whl", hash = "sha256:ddaea91abf8b0d13443f6dac52e89051a5063c7d014710dcb4d4abb2ff811a59"},
+-    {file = "wrapt-1.14.1-cp27-cp27m-manylinux2010_x86_64.whl", hash = "sha256:36f582d0c6bc99d5f39cd3ac2a9062e57f3cf606ade29a0a0d6b323462f4dd87"},
+-    {file = "wrapt-1.14.1-cp27-cp27mu-manylinux1_i686.whl", hash = "sha256:7ef58fb89674095bfc57c4069e95d7a31cfdc0939e2a579882ac7d55aadfd2a1"},
+-    {file = "wrapt-1.14.1-cp27-cp27mu-manylinux1_x86_64.whl", hash = "sha256:e2f83e18fe2f4c9e7db597e988f72712c0c3676d337d8b101f6758107c42425b"},
+-    {file = "wrapt-1.14.1-cp27-cp27mu-manylinux2010_i686.whl", hash = "sha256:ee2b1b1769f6707a8a445162ea16dddf74285c3964f605877a20e38545c3c462"},
+-    {file = "wrapt-1.14.1-cp27-cp27mu-manylinux2010_x86_64.whl", hash = "sha256:833b58d5d0b7e5b9832869f039203389ac7cbf01765639c7309fd50ef619e0b1"},
+-    {file = "wrapt-1.14.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:80bb5c256f1415f747011dc3604b59bc1f91c6e7150bd7db03b19170ee06b320"},
+-    {file = "wrapt-1.14.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:07f7a7d0f388028b2df1d916e94bbb40624c59b48ecc6cbc232546706fac74c2"},
+-    {file = "wrapt-1.14.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:02b41b633c6261feff8ddd8d11c711df6842aba629fdd3da10249a53211a72c4"},
+-    {file = "wrapt-1.14.1-cp310-cp310-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2fe803deacd09a233e4762a1adcea5db5d31e6be577a43352936179d14d90069"},
+-    {file = "wrapt-1.14.1-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:257fd78c513e0fb5cdbe058c27a0624c9884e735bbd131935fd49e9fe719d310"},
+-    {file = "wrapt-1.14.1-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:4fcc4649dc762cddacd193e6b55bc02edca674067f5f98166d7713b193932b7f"},
+-    {file = "wrapt-1.14.1-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:11871514607b15cfeb87c547a49bca19fde402f32e2b1c24a632506c0a756656"},
+-    {file = "wrapt-1.14.1-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:8ad85f7f4e20964db4daadcab70b47ab05c7c1cf2a7c1e51087bfaa83831854c"},
+-    {file = "wrapt-1.14.1-cp310-cp310-win32.whl", hash = "sha256:a9a52172be0b5aae932bef82a79ec0a0ce87288c7d132946d645eba03f0ad8a8"},
+-    {file = "wrapt-1.14.1-cp310-cp310-win_amd64.whl", hash = "sha256:6d323e1554b3d22cfc03cd3243b5bb815a51f5249fdcbb86fda4bf62bab9e164"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-manylinux1_i686.whl", hash = "sha256:43ca3bbbe97af00f49efb06e352eae40434ca9d915906f77def219b88e85d907"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-manylinux1_x86_64.whl", hash = "sha256:6b1a564e6cb69922c7fe3a678b9f9a3c54e72b469875aa8018f18b4d1dd1adf3"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-manylinux2010_i686.whl", hash = "sha256:00b6d4ea20a906c0ca56d84f93065b398ab74b927a7a3dbd470f6fc503f95dc3"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-manylinux2010_x86_64.whl", hash = "sha256:a85d2b46be66a71bedde836d9e41859879cc54a2a04fad1191eb50c2066f6e9d"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-win32.whl", hash = "sha256:dbcda74c67263139358f4d188ae5faae95c30929281bc6866d00573783c422b7"},
+-    {file = "wrapt-1.14.1-cp35-cp35m-win_amd64.whl", hash = "sha256:b21bb4c09ffabfa0e85e3a6b623e19b80e7acd709b9f91452b8297ace2a8ab00"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:9e0fd32e0148dd5dea6af5fee42beb949098564cc23211a88d799e434255a1f4"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9736af4641846491aedb3c3f56b9bc5568d92b0692303b5a305301a95dfd38b1"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:5b02d65b9ccf0ef6c34cba6cf5bf2aab1bb2f49c6090bafeecc9cd81ad4ea1c1"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:21ac0156c4b089b330b7666db40feee30a5d52634cc4560e1905d6529a3897ff"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-musllinux_1_1_aarch64.whl", hash = "sha256:9f3e6f9e05148ff90002b884fbc2a86bd303ae847e472f44ecc06c2cd2fcdb2d"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-musllinux_1_1_i686.whl", hash = "sha256:6e743de5e9c3d1b7185870f480587b75b1cb604832e380d64f9504a0535912d1"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-musllinux_1_1_x86_64.whl", hash = "sha256:d79d7d5dc8a32b7093e81e97dad755127ff77bcc899e845f41bf71747af0c569"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-win32.whl", hash = "sha256:81b19725065dcb43df02b37e03278c011a09e49757287dca60c5aecdd5a0b8ed"},
+-    {file = "wrapt-1.14.1-cp36-cp36m-win_amd64.whl", hash = "sha256:b014c23646a467558be7da3d6b9fa409b2c567d2110599b7cf9a0c5992b3b471"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:88bd7b6bd70a5b6803c1abf6bca012f7ed963e58c68d76ee20b9d751c74a3248"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b5901a312f4d14c59918c221323068fad0540e34324925c8475263841dbdfe68"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d77c85fedff92cf788face9bfa3ebaa364448ebb1d765302e9af11bf449ca36d"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8d649d616e5c6a678b26d15ece345354f7c2286acd6db868e65fcc5ff7c24a77"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-musllinux_1_1_aarch64.whl", hash = "sha256:7d2872609603cb35ca513d7404a94d6d608fc13211563571117046c9d2bcc3d7"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-musllinux_1_1_i686.whl", hash = "sha256:ee6acae74a2b91865910eef5e7de37dc6895ad96fa23603d1d27ea69df545015"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-musllinux_1_1_x86_64.whl", hash = "sha256:2b39d38039a1fdad98c87279b48bc5dce2c0ca0d73483b12cb72aa9609278e8a"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-win32.whl", hash = "sha256:60db23fa423575eeb65ea430cee741acb7c26a1365d103f7b0f6ec412b893853"},
+-    {file = "wrapt-1.14.1-cp37-cp37m-win_amd64.whl", hash = "sha256:709fe01086a55cf79d20f741f39325018f4df051ef39fe921b1ebe780a66184c"},
+-    {file = "wrapt-1.14.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:8c0ce1e99116d5ab21355d8ebe53d9460366704ea38ae4d9f6933188f327b456"},
+-    {file = "wrapt-1.14.1-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:e3fb1677c720409d5f671e39bac6c9e0e422584e5f518bfd50aa4cbbea02433f"},
+-    {file = "wrapt-1.14.1-cp38-cp38-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:642c2e7a804fcf18c222e1060df25fc210b9c58db7c91416fb055897fc27e8cc"},
+-    {file = "wrapt-1.14.1-cp38-cp38-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:7b7c050ae976e286906dd3f26009e117eb000fb2cf3533398c5ad9ccc86867b1"},
+-    {file = "wrapt-1.14.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ef3f72c9666bba2bab70d2a8b79f2c6d2c1a42a7f7e2b0ec83bb2f9e383950af"},
+-    {file = "wrapt-1.14.1-cp38-cp38-musllinux_1_1_aarch64.whl", hash = "sha256:01c205616a89d09827986bc4e859bcabd64f5a0662a7fe95e0d359424e0e071b"},
+-    {file = "wrapt-1.14.1-cp38-cp38-musllinux_1_1_i686.whl", hash = "sha256:5a0f54ce2c092aaf439813735584b9537cad479575a09892b8352fea5e988dc0"},
+-    {file = "wrapt-1.14.1-cp38-cp38-musllinux_1_1_x86_64.whl", hash = "sha256:2cf71233a0ed05ccdabe209c606fe0bac7379fdcf687f39b944420d2a09fdb57"},
+-    {file = "wrapt-1.14.1-cp38-cp38-win32.whl", hash = "sha256:aa31fdcc33fef9eb2552cbcbfee7773d5a6792c137b359e82879c101e98584c5"},
+-    {file = "wrapt-1.14.1-cp38-cp38-win_amd64.whl", hash = "sha256:d1967f46ea8f2db647c786e78d8cc7e4313dbd1b0aca360592d8027b8508e24d"},
+-    {file = "wrapt-1.14.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:3232822c7d98d23895ccc443bbdf57c7412c5a65996c30442ebe6ed3df335383"},
+-    {file = "wrapt-1.14.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:988635d122aaf2bdcef9e795435662bcd65b02f4f4c1ae37fbee7401c440b3a7"},
+-    {file = "wrapt-1.14.1-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9cca3c2cdadb362116235fdbd411735de4328c61425b0aa9f872fd76d02c4e86"},
+-    {file = "wrapt-1.14.1-cp39-cp39-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d52a25136894c63de15a35bc0bdc5adb4b0e173b9c0d07a2be9d3ca64a332735"},
+-    {file = "wrapt-1.14.1-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:40e7bc81c9e2b2734ea4bc1aceb8a8f0ceaac7c5299bc5d69e37c44d9081d43b"},
+-    {file = "wrapt-1.14.1-cp39-cp39-musllinux_1_1_aarch64.whl", hash = "sha256:b9b7a708dd92306328117d8c4b62e2194d00c365f18eff11a9b53c6f923b01e3"},
+-    {file = "wrapt-1.14.1-cp39-cp39-musllinux_1_1_i686.whl", hash = "sha256:6a9a25751acb379b466ff6be78a315e2b439d4c94c1e99cb7266d40a537995d3"},
+-    {file = "wrapt-1.14.1-cp39-cp39-musllinux_1_1_x86_64.whl", hash = "sha256:34aa51c45f28ba7f12accd624225e2b1e5a3a45206aa191f6f9aac931d9d56fe"},
+-    {file = "wrapt-1.14.1-cp39-cp39-win32.whl", hash = "sha256:dee0ce50c6a2dd9056c20db781e9c1cfd33e77d2d569f5d1d9321c641bb903d5"},
+-    {file = "wrapt-1.14.1-cp39-cp39-win_amd64.whl", hash = "sha256:dee60e1de1898bde3b238f18340eec6148986da0455d8ba7848d50470a7a32fb"},
+-    {file = "wrapt-1.14.1.tar.gz", hash = "sha256:380a85cf89e0e69b7cfbe2ea9f765f004ff419f34194018a6827ac0e3edfed4d"},
+-]
+-zipp = [
+-    {file = "zipp-3.11.0-py3-none-any.whl", hash = "sha256:83a28fcb75844b5c0cdaf5aa4003c2d728c77e05f5aeabe8e95e56727005fbaa"},
+-    {file = "zipp-3.11.0.tar.gz", hash = "sha256:a7a22e05929290a67401440b39690ae6563279bced5f314609d9d03798f56766"},
+-]
+diff --git a/pyproject.toml b/pyproject.toml
+deleted file mode 100644
+index e8b1396..0000000
+--- a/pyproject.toml
++++ /dev/null
+@@ -1,47 +0,0 @@
+-[tool.poetry]
+-name = "docker-tor-hidden-service"
+-version = "0.7.1"
+-description = "Display onion sites hosted"
+-authors = ["Christophe Mehay <cmehay@nospam.student.42.fr>"]
+-license = "WTFPL"
+-repository = "https://github.com/cmehay/docker-tor-hidden-service"
+-classifiers=[
+-        "Programming Language :: Python",
+-        "Development Status :: 1 - Planning",
+-        "License :: OSI Approved :: BSD License",
+-        "Natural Language :: English",
+-        "Operating System :: POSIX :: Linux",
+-        "Programming Language :: Python :: 3",
+-        "Programming Language :: Python :: 3.7",
+-        "Topic :: System :: Installation/Setup",
+-    ]
+-packages = [
+-    { include = "onions" },
+-]
+-
+-[tool.poetry.scripts]
+-onions = "onions:main"
+-
+-[tool.poetry.dependencies]
+-python = ">=3.10,<3.11"
+-Jinja2 = ">=2.10"
+-importlib_metadata = ">=1.6.0"
+-vanguards = "^0.3.1"
+-ipy = ">=1.00"
+-pytor = '^0.1.9'
+-pyentrypoint = "^0.8.0"
+-
+-[tool.poetry.dev-dependencies]
+-autopep8 = ">=1.5.2"
+-tox = ">=3.15.0"
+-cryptography = ">=3.2"
+-pylint = ">=2.5.2"
+-ptpython = ">=3.0.2"
+-black = ">=22.6.0"
+-pre-commit = "^2.20.0"
+-pytest = ">=5.4.2"
+-pyfakefs = ">=4.0.2"
+-
+-[build-system]
+-requires = ["poetry>=0.12"]
+-build-backend = "poetry.masonry.api"
+diff --git a/tests/__init__.py b/tests/__init__.py
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/tests/onions_test.py b/tests/onions_test.py
+deleted file mode 100644
+index 13c2780..0000000
+--- a/tests/onions_test.py
++++ /dev/null
+@@ -1,695 +0,0 @@
+-import configparser
+-import json
+-import os
+-import re
+-import pytest
+-from base64 import b32encode
+-from base64 import b64decode
+-from hashlib import sha1
+-
+-from onions import Onions
+-
+-
+-def get_key_and_onion(version=3):
+-    key = {}
+-    onion = {}
+-    pub = {}
+-
+-
+-    key[
+-        3
+-    ] = """
+-PT0gZWQyNTUxOXYxLXNlY3JldDogdHlwZTAgPT0AAACArobDQYyZAWXei4QZwr++j96H1X/gq14N
+-wLRZ2O5DXuL0EzYKkdhZSILY85q+kfwZH8z4ceqe7u1F+0pQi/sM
+-    """
+-
+-    pub[
+-        3
+-    ] = """
+-PT0gZWQyNTUxOXYxLXB1YmxpYzogdHlwZTAgPT0AAAC9kzftiea/kb+TWlCEVNpfUJLVk+rFIoMG
+-m9/hW13isA==
+-    """
+-
+-    onion[3] = "xwjtp3mj427zdp4tljiiivg2l5ijfvmt5lcsfaygtpp6cw254kykvpyd.onion"
+-
+-    return key[version].strip(), onion[version]
+-
+-
+-def get_torrc_template():
+-    return r"""
+-{% for service_group in onion.services %}
+-HiddenServiceDir {{service_group.hidden_service_dir}}
+-    {% if service_group.version == 3 %}
+-HiddenServiceVersion 3
+-    {% endif %}
+-    {% for service in service_group.services %}
+-        {% for port in service.ports %}
+-            {% if port.is_socket %}
+-HiddenServicePort {{port.port_from}} {{port.dest}}
+-            {% endif %}
+-            {% if not port.is_socket %}
+-HiddenServicePort {{port.port_from}} {{service.host}}:{{port.dest}}
+-            {% endif %}
+-        {% endfor %}
+-    {% endfor %}
+-{% endfor %}
+-DataDirectory {{ onion.data_directory }}
+-{% if 'TOR_SOCKS_PORT' in env %}
+-SocksPort {{env['TOR_SOCKS_PORT']}}
+-{% else %}
+-SocksPort 0
+-{% endif %}
+-
+-{% if envtobool('TOR_EXIT_RELAY', False) %}
+-ExitRelay 1
+-{% else %}
+-ExitRelay 0
+-{% endif %}
+-
+-{% if onion.enable_control_port %}
+-    {% if onion.control_socket %}
+-ControlPort {{onion.control_socket}}
+-    {% endif %}
+-    {% if not onion.control_socket %}
+-        {% if onion.control_ip_binding.version() == 4 %}
+-ControlPort {{onion.control_ip_binding}}:{{ onion.control_port }}
+-        {% endif %}
+-        {% if onion.control_ip_binding.version() == 6 %}
+-ControlPort [{{onion.control_ip_binding}}]:{{ onion.control_port }}
+-        {% endif %}
+-    {% endif %}
+-    {% if onion.control_hashed_password %}
+-HashedControlPassword {{ onion.control_hashed_password }}
+-    {% endif %}
+-{% endif %}
+-
+-
+-{% if 'TOR_EXTRA_OPTIONS' in env %}
+-{{env['TOR_EXTRA_OPTIONS']}}
+-{% endif %}
+-
+-# useless line for Jinja bug
+-
+-
+-# useless line for Jinja bug
+-    """.strip()
+-
+-
+-def test_ports(monkeypatch):
+-    env = {
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "80:80,81:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-    assert len(os.environ) == 3
+-    assert len(onion.services) == 3
+-    check = 0
+-    for service_group in onion.services:
+-        assert len(service_group.services) == 1
+-        service = service_group.services[0]
+-        if service.host == "service1":
+-            check += 1
+-            assert len(service.ports) == 1
+-            assert service.ports[0].port_from == 80
+-            assert service.ports[0].dest == 80
+-            assert not service.ports[0].is_socket
+-        if service.host == "service2":
+-            check += 3
+-            assert len(service.ports) == 2
+-            assert service.ports[0].port_from == 80
+-            assert service.ports[0].dest == 80
+-            assert service.ports[1].port_from == 81
+-            assert service.ports[1].dest == 8000
+-        if service.host == "service3":
+-            check += 6
+-            assert len(service.ports) == 1
+-            assert service.ports[0].port_from == 80
+-            assert service.ports[0].dest == "unix://unix.socket"
+-            assert service.ports[0].is_socket
+-
+-    assert check == 10
+-
+-
+-def test_docker_links(fs, monkeypatch):
+-
+-    env = {
+-        "HOSTNAME": "test_env",
+-        "COMPOSE_SERVICE1_1_PORT": "tcp://172.17.0.2:80",
+-        "COMPOSE_SERVICE1_1_PORT_80_TCP": "tcp://172.17.0.2:80",
+-        "COMPOSE_SERVICE1_1_PORT_80_TCP_ADDR": "172.17.0.2",
+-        "COMPOSE_SERVICE1_1_PORT_80_TCP_PORT": "80",
+-        "COMPOSE_SERVICE1_1_PORT_80_TCP_PROTO": "tcp",
+-        "COMPOSE_SERVICE1_1_PORT_8000_TCP": "tcp://172.17.0.2:8000",
+-        "COMPOSE_SERVICE1_1_PORT_8000_TCP_ADDR": "172.17.0.2",
+-        "COMPOSE_SERVICE1_1_PORT_8000_TCP_PORT": "8000",
+-        "COMPOSE_SERVICE1_1_PORT_8000_TCP_PROTO": "tcp",
+-        "COMPOSE_SERVICE1_1_NAME": "/compose_env_1/compose_service1_1",
+-        "SERVICE1_PORT": "tcp://172.17.0.2:80",
+-        "SERVICE1_PORT_80_TCP": "tcp://172.17.0.2:80",
+-        "SERVICE1_PORT_80_TCP_ADDR": "172.17.0.2",
+-        "SERVICE1_PORT_80_TCP_PORT": "80",
+-        "SERVICE1_PORT_80_TCP_PROTO": "tcp",
+-        "SERVICE1_PORT_8000_TCP": "tcp://172.17.0.2:8000",
+-        "SERVICE1_PORT_8000_TCP_ADDR": "172.17.0.2",
+-        "SERVICE1_PORT_8000_TCP_PORT": "8000",
+-        "SERVICE1_PORT_8000_TCP_PROTO": "tcp",
+-        "SERVICE1_NAME": "/compose_env_1/service1",
+-        "SERVICE1_1_PORT": "tcp://172.17.0.2:80",
+-        "SERVICE1_1_PORT_80_TCP": "tcp://172.17.0.2:80",
+-        "SERVICE1_1_PORT_80_TCP_ADDR": "172.17.0.2",
+-        "SERVICE1_1_PORT_80_TCP_PORT": "80",
+-        "SERVICE1_1_PORT_80_TCP_PROTO": "tcp",
+-        "SERVICE1_1_PORT_8000_TCP": "tcp://172.17.0.2:8000",
+-        "SERVICE1_1_PORT_8000_TCP_ADDR": "172.17.0.2",
+-        "SERVICE1_1_PORT_8000_TCP_PORT": "8000",
+-        "SERVICE1_1_PORT_8000_TCP_PROTO": "tcp",
+-        "SERVICE1_1_NAME": "/compose_env_1/service1_1",
+-    }
+-
+-    etc_host = """
+-127.0.0.1	localhost
+-::1	localhost ip6-localhost ip6-loopback
+-fe00::0	ip6-localnet
+-ff00::0	ip6-mcastprefix
+-ff02::1	ip6-allnodes
+-ff02::2	ip6-allrouters
+-172.17.0.2	service1 bf447f22cdba compose_service1_1
+-172.17.0.2	service1_1 bf447f22cdba compose_service1_1
+-172.17.0.2	compose_service1_1 bf447f22cdba
+-    """.strip()
+-
+-    fs.create_file("/etc/hosts", contents=etc_host)
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_links()
+-
+-    assert len(onion.services) == 1
+-    group = onion.services[0]
+-    assert len(group.services) == 1
+-    service = group.services[0]
+-    assert len(service.ports) == 2
+-    assert set((port.port_from, port.dest) for port in service.ports) == set(
+-        [(80, 80), (8000, 8000)]
+-    )
+-
+-
+-
+-def test_key_v3(monkeypatch):
+-    key, onion_url = get_key_and_onion(version=3)
+-    env = {
+-        "GROUP1_TOR_SERVICE_HOSTS": "80:service1:80,81:service2:80",
+-        "GROUP1_TOR_SERVICE_VERSION": "3",
+-        "GROUP1_TOR_SERVICE_KEY": key,
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-    onion._load_keys_in_services()
+-
+-    assert len(os.environ) == 3
+-    assert len(onion.services) == 1
+-
+-    assert onion.services[0].onion_url == onion_url
+-
+-
+-def test_key_in_secret(fs, monkeypatch):
+-    env = {
+-        # "GROUP1_TOR_SERVICE_HOSTS": "80:service1:80",
+-        "GROUP2_TOR_SERVICE_HOSTS": "80:service2:80",
+-        "GROUP3_TOR_SERVICE_HOSTS": "80:service3:80",
+-        "GROUP3_TOR_SERVICE_VERSION": "3",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    # key_v2, onion_url_v2 = get_key_and_onion()
+-    key_v3, onion_url_v3 = get_key_and_onion(version=3)
+-
+-    fs.create_file("/run/secrets/group3", contents=b64decode(key_v3))
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-    onion._load_keys_in_services()
+-
+-    # group1 = onion.find_group_by_name("group1")
+-    group2 = onion.find_group_by_name("group2")
+-    group3 = onion.find_group_by_name("group3")
+-
+-    # assert group1.onion_url == onion_url_v2
+-    assert group2.onion_url != onion_url_v3
+-    assert group3.onion_url == onion_url_v3
+-
+-
+-def test_configuration(fs, monkeypatch, tmpdir):
+-    extra_options = """
+-HiddenServiceNonAnonymousMode 1
+-HiddenServiceSingleHopMode 1
+-    """.strip()
+-
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "81:80,82:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-        "GROUP3_TOR_SERVICE_HOSTS": "80:service4:888,81:service5:8080",
+-        "GROUP4_TOR_SERVICE_VERSION": "3",
+-        "GROUP4_TOR_SERVICE_HOSTS": "81:unix://unix2.sock",
+-        "GROUP3V3_TOR_SERVICE_VERSION": "3",
+-        "GROUP3V3_TOR_SERVICE_HOSTS": "80:service4:888,81:service5:8080",
+-        "SERVICE5_TOR_SERVICE_HOSTS": "80:service5:80",
+-        "TOR_EXTRA_OPTIONS": extra_options,
+-    }
+-
+-    hidden_dir = "/var/lib/tor/hidden_service"
+-
+-    monkeypatch.setattr(os, "environ", env)
+-    monkeypatch.setattr(os, "fchmod", lambda x, y: None)
+-
+-    torrc_tpl = get_torrc_template()
+-
+-    fs.create_file("/var/local/tor/torrc.tpl", contents=torrc_tpl)
+-    fs.create_file("/etc/tor/torrc")
+-    fs.create_dir(hidden_dir)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-    onion._load_keys_in_services()
+-    onion.apply_conf()
+-
+-    onions_urls = {}
+-    for dir in os.listdir(hidden_dir):
+-        with open(os.path.join(hidden_dir, dir, "hostname"), "r") as f:
+-            onions_urls[dir] = f.read().strip()
+-
+-    with open("/etc/tor/torrc", "r") as f:
+-        torrc = f.read()
+-
+-    print(torrc)
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/group1" in torrc
+-    assert "HiddenServicePort 80 service1:80" in torrc
+-    assert "HiddenServicePort 81 service2:80" in torrc
+-    assert "HiddenServicePort 82 service2:8000" in torrc
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/group2" in torrc
+-    assert "HiddenServicePort 80 unix://unix.socket" in torrc
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/group3" in torrc
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/group4" in torrc
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/group3v3" in torrc
+-    assert "HiddenServiceDir /var/lib/tor/hidden_service/service5" in torrc
+-    assert torrc.count("HiddenServicePort 80 service4:888") == 2
+-    assert torrc.count("HiddenServicePort 81 service5:8080") == 2
+-    assert torrc.count("HiddenServicePort 80 service5:80") == 1
+-    assert torrc.count("HiddenServicePort 81 unix://unix2.sock") == 1
+-    assert torrc.count("HiddenServiceVersion 3") == 6
+-    assert "HiddenServiceNonAnonymousMode 1\n" in torrc
+-    assert "HiddenServiceSingleHopMode 1\n" in torrc
+-    assert "ControlPort" not in torrc
+-
+-    # Check parser
+-    onion2 = Onions()
+-    onion2.torrc_parser()
+-
+-    assert len(onion2.services) == 6
+-
+-    assert set(
+-        group.name
+-        for group in onion2.services
+-        # ) == set(['group1', 'group2'])
+-    ) == set(["group1", "group2", "group3", "group4", "group3v3", "service5"])
+-
+-    for group in onion2.services:
+-        if group.name == "group1":
+-            assert len(group.services) == 2
+-            assert group.version == 3
+-            assert group.onion_url == onions_urls[group.name]
+-            assert set(service.host for service in group.services) == set(
+-                ["service1", "service2"]
+-            )
+-            for service in group.services:
+-                if service.host == "service1":
+-                    assert len(service.ports) == 1
+-                    assert set(
+-                        (port.port_from, port.dest) for port in service.ports
+-                    ) == set([(80, 80)])
+-                if service.host == "service2":
+-                    assert len(service.ports) == 2
+-                    assert set(
+-                        (port.port_from, port.dest) for port in service.ports
+-                    ) == set([(81, 80), (82, 8000)])
+-        if group.name == "group2":
+-            assert len(group.services) == 1
+-            assert group.version == 3
+-            assert group.onion_url == onions_urls[group.name]
+-            assert set(service.host for service in group.services) == set(
+-                ["group2"]
+-            )
+-            service = group.services[0]
+-            assert len(service.ports) == 1
+-            assert set(
+-                (port.port_from, port.dest) for port in service.ports
+-            ) == set([(80, "unix://unix.socket")])
+-
+-        if group.name in ["group3", "group3v3"]:
+-            assert len(group.services) == 2
+-            assert group.version == 3
+-            assert group.onion_url == onions_urls[group.name]
+-            assert set(service.host for service in group.services) == set(
+-                ["service4", "service5"]
+-            )
+-            for service in group.services:
+-                if service.host == "service4":
+-                    assert len(service.ports) == 1
+-                    assert set(
+-                        (port.port_from, port.dest) for port in service.ports
+-                    ) == set([(80, 888)])
+-                if service.host == "service5":
+-                    assert len(service.ports) == 1
+-                    assert set(
+-                        (port.port_from, port.dest) for port in service.ports
+-                    ) == set([(81, 8080)])
+-
+-        if group.name == "group4":
+-            assert len(group.services) == 1
+-            assert group.version == 3
+-            assert group.onion_url == onions_urls[group.name]
+-            assert set(service.host for service in group.services) == set(
+-                ["group4"]
+-            )
+-            for service in group.services:
+-                assert service.host == "group4"
+-                assert len(service.ports) == 1
+-                assert set(
+-                    (port.port_from, port.dest) for port in service.ports
+-                ) == set([(81, "unix://unix2.sock")])
+-
+-        if group.name == "service5":
+-            assert len(group.services) == 1
+-            assert group.version == 3
+-            assert group.onion_url == onions_urls[group.name]
+-            assert set(service.host for service in group.services) == set(
+-                ["service5"]
+-            )
+-            for service in group.services:
+-                assert service.host == "service5"
+-                assert len(service.ports) == 1
+-                assert set(
+-                    (port.port_from, port.dest) for port in service.ports
+-                ) == set([(80, 80)])
+-
+-    # bug with fakefs, test everything in the same function
+-
+-    env = {
+-        "TOR_CONTROL_PORT": "172.0.1.0:7867",
+-        "TOR_CONTROL_PASSWORD": "secret",
+-    }
+-
+-    def mock_hash(self, password):
+-        self.control_hashed_password = "myhashedpassword"
+-
+-    monkeypatch.setattr(os, "environ", env)
+-    monkeypatch.setattr(Onions, "_hash_control_port_password", mock_hash)
+-
+-    onion = Onions()
+-    onion._setup_control_port()
+-    onion.apply_conf()
+-
+-    with open("/etc/tor/torrc", "r") as f:
+-        torrc = f.read()
+-
+-    print(torrc)
+-    assert "ControlPort 172.0.1.0:7867" in torrc
+-    assert f"HashedControlPassword {onion.control_hashed_password}" in torrc
+-
+-    env = {
+-        "TOR_CONTROL_PORT": "unix:/path/to.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    torrc_tpl = get_torrc_template()
+-
+-    onion = Onions()
+-    onion._setup_control_port()
+-    onion.apply_conf()
+-
+-    with open("/etc/tor/torrc", "r") as f:
+-        torrc = f.read()
+-
+-    print(torrc)
+-    assert "ControlPort unix:/path/to.socket" in torrc
+-
+-
+-def test_groups(monkeypatch):
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "81:80,82:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-
+-    onion_match = r"^[a-z2-7]{56}.onion$"
+-
+-    assert len(os.environ) == 6
+-    assert len(onion.services) == 2
+-
+-    assert set(group.name for group in onion.services) == set(
+-        ["group1", "group2"]
+-    )
+-
+-    for group in onion.services:
+-        if group.name == "group1":
+-            assert len(group.services) == 2
+-            assert set(service.host for service in group.services) == set(
+-                ["service1", "service2"]
+-            )
+-
+-        if group.name == "group2":
+-            assert len(group.services) == 1
+-            assert set(service.host for service in group.services) == set(
+-                ["service3"]
+-            )
+-
+-        assert re.match(onion_match, group.onion_url)
+-
+-
+-def test_json(monkeypatch):
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "81:80,82:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-    onion.check_services()
+-
+-    jsn = json.loads(onion.to_json())
+-
+-    assert len(jsn) == 2
+-    assert len(jsn["group1"]) == 3
+-    assert len(jsn["group2"]) == 1
+-
+-
+-def test_output(monkeypatch):
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "81:80,82:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-
+-    for item in ["group1", "group2", ".onion", ","]:
+-        assert item in str(onion)
+-
+-
+-def test_not_valid_share_port(monkeypatch):
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-        "SERVICE1_PORTS": "80:80",
+-        "SERVICE2_PORTS": "80:80,82:8000",
+-        "SERVICE3_PORTS": "80:unix://unix.socket",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-
+-    with pytest.raises(Exception) as excinfo:
+-        onion.check_services()
+-        assert "Same port for multiple services" in str(excinfo.value)
+-
+-
+-def test_not_valid_no_services(monkeypatch):
+-    env = {
+-        "SERVICE1_SERVICE_NAME": "group1",
+-        "SERVICE2_SERVICE_NAME": "group1",
+-        "SERVICE3_SERVICE_NAME": "group2",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-
+-    onion = Onions()
+-    onion._get_setup_from_env()
+-
+-    with pytest.raises(Exception) as excinfo:
+-        onion.check_services()
+-        assert "has not ports set" in str(excinfo.value)
+-
+-
+-def get_vanguards_template():
+-    return r"""
+-## Global options
+-[Global]
+-
+-{% if env.get('TOR_CONTROL_PORT', '').startswith('unix:') %}
+-{% set _, unix_path = env['TOR_CONTROL_PORT'].split(':', 1) %}
+-{% elif ':' in env.get('TOR_CONTROL_PORT', '') %}
+-{% set host, port = env['TOR_CONTROL_PORT'].split(':', 1) %}
+-{% else %}
+-{% set host = env.get('TOR_CONTROL_PORT') %}
+-{% endif %}
+-
+-control_ip = {{ host or '' }}
+-
+-control_port = {{ port or 9051 }}
+-
+-control_socket = {{ unix_path or '' }}
+-
+-control_pass = {{ env.get('TOR_CONTROL_PASSWORD', '') }}
+-
+-state_file = {{ env.get('VANGUARDS_STATE_FILE', '/run/tor/data/vanguards.state') }}
+-
+-
+-{% if 'VANGUARDS_EXTRA_OPTIONS' in env %}
+-{% set extra_conf = ConfigParser().read_string(env['VANGUARDS_EXTRA_OPTIONS']) %}
+-{% if 'Global' in extra_conf %}
+-{% for key, val in extra_conf['Global'].items() %}
+-{{key}} = {{val}}
+-{% endfor %}
+-{% set _ = extra_conf.pop('Global') %}
+-{% endif %}
+-{{ extra_conf.to_string() }}
+-{% endif %}
+-
+-    """.strip()  # noqa
+-
+-
+-def test_vanguards_configuration_sock(fs, monkeypatch):
+-    extra_options = """
+-[Global]
+-enable_cbtverify = True
+-loglevel = DEBUG
+-
+-[Rendguard]
+-rend_use_max_use_to_bw_ratio = 4.0
+-    """.strip()
+-
+-    env = {
+-        "TOR_ENABLE_VANGUARDS": "true",
+-        "TOR_CONTROL_PORT": "unix:/path/to/sock",
+-        "VANGUARDS_EXTRA_OPTIONS": extra_options,
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-    monkeypatch.setattr(os, "fchmod", lambda x, y: None)
+-
+-    torrc_tpl = get_vanguards_template()
+-
+-    fs.create_file("/var/local/tor/vanguards.conf.tpl", contents=torrc_tpl)
+-    fs.create_file("/etc/tor/vanguards.conf")
+-
+-    onion = Onions()
+-    onion.resolve_control_port()
+-    onion._setup_vanguards()
+-    onion._write_vanguards_conf()
+-
+-    vanguard_conf = configparser.ConfigParser()
+-
+-    with open("/etc/tor/vanguards.conf", "r") as f:
+-        print(f.read())
+-
+-    vanguard_conf.read("/etc/tor/vanguards.conf")
+-
+-    assert vanguard_conf["Global"]
+-    assert not vanguard_conf["Global"]["control_ip"]
+-    assert vanguard_conf["Global"]["control_port"] == "9051"
+-    assert vanguard_conf["Global"]["control_socket"] == "/path/to/sock"
+-    assert not vanguard_conf["Global"]["control_pass"]
+-    assert (
+-        vanguard_conf["Global"]["state_file"]
+-        == "/run/tor/data/vanguards.state"
+-    )
+-    assert vanguard_conf["Global"]["enable_cbtverify"]
+-    assert vanguard_conf["Global"]["loglevel"] == "DEBUG"
+-    assert vanguard_conf["Rendguard"]["rend_use_max_use_to_bw_ratio"] == "4.0"
+-
+-
+-def test_vanguards_configuration_ip(fs, monkeypatch):
+-
+-    env = {
+-        "TOR_ENABLE_VANGUARDS": "true",
+-        "TOR_CONTROL_PORT": "127.0.0.1:7864",
+-        "TOR_CONTROL_PASSWORD": "secret",
+-    }
+-
+-    monkeypatch.setattr(os, "environ", env)
+-    monkeypatch.setattr(os, "fchmod", lambda x, y: None)
+-
+-    torrc_tpl = get_vanguards_template()
+-
+-    fs.create_file("/var/local/tor/vanguards.conf.tpl", contents=torrc_tpl)
+-    fs.create_file("/etc/tor/vanguards.conf")
+-
+-    onion = Onions()
+-    onion.resolve_control_port()
+-    onion._setup_vanguards()
+-    onion._write_vanguards_conf()
+-
+-    vanguard_conf = configparser.ConfigParser()
+-
+-    with open("/etc/tor/vanguards.conf", "r") as f:
+-        print(f.read())
+-
+-    vanguard_conf.read("/etc/tor/vanguards.conf")
+-
+-    assert vanguard_conf["Global"]
+-    assert vanguard_conf["Global"]["control_ip"] == "127.0.0.1"
+-    assert vanguard_conf["Global"]["control_port"] == "7864"
+-    assert not vanguard_conf["Global"]["control_socket"]
+-    assert vanguard_conf["Global"]["control_pass"] == "secret"
+-    assert (
+-        vanguard_conf["Global"]["state_file"]
+-        == "/run/tor/data/vanguards.state"
+-    )
+diff --git a/tests/onions_test.sh b/tests/onions_test.sh
+new file mode 100755
+index 0000000..515eb4f
+--- /dev/null
++++ b/tests/onions_test.sh
+@@ -0,0 +1,292 @@
++#!/usr/bin/env bash
++# Tests for bin/onions. Requires bash >= 4.4 and base64.
++set -uo pipefail
++
++ONIONS="$(cd "$(dirname "$0")/.." && pwd)/bin/onions"
++KEY_V3='PT0gZWQyNTUxOXYxLXNlY3JldDogdHlwZTAgPT0AAACArobDQYyZAWXei4QZwr++j96H1X/gq14N
++wLRZ2O5DXuL0EzYKkdhZSILY85q+kfwZH8z4ceqe7u1F+0pQi/sM'
++ONION_V3='xwjtp3mj427zdp4tljiiivg2l5ijfvmt5lcsfaygtpp6cw254kykvpyd.onion'
++
++failures=0
++tests=0
++TMP=
++
++setup() {
++    TMP=$(mktemp -d)
++    mkdir -p "$TMP/hs" "$TMP/secrets"
++    : >"$TMP/hosts"
++    cat >"$TMP/fake-tor" <<'EOF'
++#!/bin/sh
++echo "16:FAKEHASH"
++EOF
++    chmod +x "$TMP/fake-tor"
++}
++
++teardown() { rm -rf "$TMP"; }
++
++# run_onions [VAR=value...] -- [onions args...]
++run_onions() {
++    local -a vars=()
++    while (($#)) && [[ $1 != -- ]]; do
++        vars+=("$1")
++        shift
++    done
++    shift
++    env -i PATH="$PATH" \
++        HIDDEN_SERVICE_DIR="$TMP/hs" \
++        ONIONS_TORRC="$TMP/torrc" \
++        ONIONS_SECRETS_DIR="$TMP/secrets" \
++        ONIONS_HOSTS_FILE="$TMP/hosts" \
++        ONIONS_TOR_BIN="$TMP/fake-tor" \
++        "${vars[@]}" bash "$ONIONS" "$@"
++}
++
++fail() {
++    printf '    FAIL: %s\n' "$*"
++    failed=1
++}
++
++assert_contains() { grep -qxF -- "$2" <<<"$1" || fail "missing line '$2'"; }
++assert_not_contains() { ! grep -qF -- "$2" <<<"$1" || fail "unexpected '$2'"; }
++assert_count() {
++    local n
++    n=$(grep -cxF -- "$2" <<<"$1")
++    ((n == $3)) || fail "expected $3 x '$2', got $n"
++}
++assert_eq() { [[ $1 == "$2" ]] || fail "expected '$2', got '$1'"; }
++
++run_test() {
++    local name=$1
++    failed=0
++    tests=$((tests + 1))
++    setup
++    "$name"
++    teardown
++    if ((failed)); then
++        failures=$((failures + 1))
++        printf 'FAIL %s\n' "$name"
++    else
++        printf 'ok   %s\n' "$name"
++    fi
++}
++
++test_ports() {
++    run_onions SERVICE1_PORTS=80:80 SERVICE2_PORTS=80:80,81:8000 \
++        SERVICE3_PORTS=80:unix://unix.socket -- --setup-hosts || fail "setup failed"
++    local torrc
++    torrc=$(cat "$TMP/torrc")
++    assert_contains "$torrc" "HiddenServiceDir $TMP/hs/service1"
++    assert_contains "$torrc" "HiddenServicePort 80 service1:80"
++    assert_contains "$torrc" "HiddenServicePort 80 service2:80"
++    assert_contains "$torrc" "HiddenServicePort 81 service2:8000"
++    assert_contains "$torrc" "HiddenServicePort 80 unix://unix.socket"
++    assert_count "$torrc" "HiddenServiceVersion 3" 3
++    assert_contains "$torrc" "SocksPort 0"
++    assert_contains "$torrc" "ExitRelay 0"
++    assert_not_contains "$torrc" "ControlPort"
++}
++
++test_docker_links() {
++    cat >"$TMP/hosts" <<'EOF'
++127.0.0.1	localhost
++::1	localhost ip6-localhost ip6-loopback
++172.17.0.2	service1 bf447f22cdba compose_service1_1
++172.17.0.2	service1_1 bf447f22cdba compose_service1_1
++172.17.0.2	compose_service1_1 bf447f22cdba
++EOF
++    run_onions \
++        COMPOSE_SERVICE1_1_PORT_80_TCP=tcp://172.17.0.2:80 \
++        COMPOSE_SERVICE1_1_NAME=/compose_env_1/compose_service1_1 \
++        SERVICE1_PORT=tcp://172.17.0.2:80 \
++        SERVICE1_PORT_80_TCP=tcp://172.17.0.2:80 \
++        SERVICE1_PORT_80_TCP_ADDR=172.17.0.2 \
++        SERVICE1_PORT_8000_TCP=tcp://172.17.0.2:8000 \
++        SERVICE1_PORT_8000_TCP_ADDR=172.17.0.2 \
++        SERVICE1_NAME=/compose_env_1/service1 \
++        SERVICE1_1_NAME=/compose_env_1/service1_1 \
++        -- --setup-hosts || fail "setup failed"
++    local torrc
++    torrc=$(cat "$TMP/torrc")
++    assert_count "$torrc" "HiddenServiceVersion 3" 1
++    assert_contains "$torrc" "HiddenServiceDir $TMP/hs/service1"
++    assert_contains "$torrc" "HiddenServicePort 80 service1:80"
++    assert_contains "$torrc" "HiddenServicePort 8000 service1:8000"
++}
++
++test_key_v3() {
++    run_onions GROUP1_TOR_SERVICE_HOSTS=80:service1:80,81:service2:80 \
++        GROUP1_TOR_SERVICE_VERSION=3 "GROUP1_TOR_SERVICE_KEY=$KEY_V3" \
++        -- --setup-hosts || fail "setup failed"
++    local key="$TMP/hs/group1/hs_ed25519_secret_key"
++    [[ -f $key ]] || fail "key not written"
++    cmp -s "$key" <(tr -d '\n' <<<"$KEY_V3" | base64 -d) || fail "key content differs"
++    assert_eq "$(stat -c %a "$key")" 600
++    assert_eq "$(stat -c %a "$TMP/hs/group1")" 700
++}
++
++test_env_key_overrides_disk_and_drops_stale_hostname() {
++    mkdir -p "$TMP/hs/group1"
++    echo stale >"$TMP/hs/group1/hs_ed25519_secret_key"
++    echo stale.onion >"$TMP/hs/group1/hostname"
++    run_onions GROUP1_TOR_SERVICE_HOSTS=80:service1:80 "GROUP1_TOR_SERVICE_KEY=$KEY_V3" \
++        -- --setup-hosts || fail "setup failed"
++    cmp -s "$TMP/hs/group1/hs_ed25519_secret_key" <(tr -d '\n' <<<"$KEY_V3" | base64 -d) ||
++        fail "env key did not override disk key"
++    [[ ! -e $TMP/hs/group1/hostname ]] || fail "stale hostname kept"
++}
++
++test_invalid_key_is_rejected() {
++    local out
++    out=$(run_onions GROUP1_TOR_SERVICE_HOSTS=80:service1:80 \
++        GROUP1_TOR_SERVICE_KEY=aGVsbG8K -- --setup-hosts 2>&1)
++    assert_contains "$(grep -o 'not seem to be a valid ed25519 tor key' <<<"$out")" \
++        "not seem to be a valid ed25519 tor key"
++    [[ ! -e $TMP/hs/group1/hs_ed25519_secret_key ]] || fail "invalid key written"
++}
++
++test_key_in_secret() {
++    tr -d '\n' <<<"$KEY_V3" | base64 -d >"$TMP/secrets/group3"
++    run_onions GROUP2_TOR_SERVICE_HOSTS=80:service2:80 \
++        GROUP3_TOR_SERVICE_HOSTS=80:service3:80 GROUP3_TOR_SERVICE_VERSION=3 \
++        -- --setup-hosts || fail "setup failed"
++    [[ ! -e $TMP/hs/group2/hs_ed25519_secret_key ]] || fail "group2 should let tor generate a key"
++    cmp -s "$TMP/hs/group3/hs_ed25519_secret_key" "$TMP/secrets/group3" || fail "secret not installed"
++}
++
++test_disk_key_wins_over_secret() {
++    tr -d '\n' <<<"$KEY_V3" | base64 -d >"$TMP/secrets/group3"
++    mkdir -p "$TMP/hs/group3"
++    echo existing >"$TMP/hs/group3/hs_ed25519_secret_key"
++    run_onions GROUP3_TOR_SERVICE_HOSTS=80:service3:80 -- --setup-hosts || fail "setup failed"
++    assert_eq "$(cat "$TMP/hs/group3/hs_ed25519_secret_key")" existing
++}
++
++test_configuration() {
++    local extra=$'HiddenServiceNonAnonymousMode 1\nHiddenServiceSingleHopMode 1'
++    run_onions \
++        SERVICE1_SERVICE_NAME=group1 SERVICE2_SERVICE_NAME=group1 SERVICE3_SERVICE_NAME=group2 \
++        SERVICE1_PORTS=80:80 SERVICE2_PORTS=81:80,82:8000 SERVICE3_PORTS=80:unix://unix.socket \
++        GROUP3_TOR_SERVICE_HOSTS=80:service4:888,81:service5:8080 \
++        GROUP4_TOR_SERVICE_VERSION=3 GROUP4_TOR_SERVICE_HOSTS=81:unix://unix2.sock \
++        GROUP3V3_TOR_SERVICE_VERSION=3 GROUP3V3_TOR_SERVICE_HOSTS=80:service4:888,81:service5:8080 \
++        SERVICE5_TOR_SERVICE_HOSTS=80:service5:80 \
++        "TOR_EXTRA_OPTIONS=$extra" \
++        -- --setup-hosts || fail "setup failed"
++    local torrc g
++    torrc=$(cat "$TMP/torrc")
++    for g in group1 group2 group3 group4 group3v3 service5; do
++        assert_contains "$torrc" "HiddenServiceDir $TMP/hs/$g"
++        [[ -d $TMP/hs/$g ]] || fail "$TMP/hs/$g not created"
++    done
++    assert_contains "$torrc" "HiddenServicePort 80 service1:80"
++    assert_contains "$torrc" "HiddenServicePort 81 service2:80"
++    assert_contains "$torrc" "HiddenServicePort 82 service2:8000"
++    assert_contains "$torrc" "HiddenServicePort 80 unix://unix.socket"
++    assert_count "$torrc" "HiddenServicePort 80 service4:888" 2
++    assert_count "$torrc" "HiddenServicePort 81 service5:8080" 2
++    assert_count "$torrc" "HiddenServicePort 80 service5:80" 1
++    assert_count "$torrc" "HiddenServicePort 81 unix://unix2.sock" 1
++    assert_count "$torrc" "HiddenServiceVersion 3" 6
++    assert_contains "$torrc" "HiddenServiceNonAnonymousMode 1"
++    assert_contains "$torrc" "HiddenServiceSingleHopMode 1"
++    assert_not_contains "$torrc" "ControlPort"
++}
++
++test_control_port_ip() {
++    run_onions TOR_CONTROL_PORT=172.0.1.0:7867 TOR_CONTROL_PASSWORD=secret \
++        -- --setup-hosts || fail "setup failed"
++    local torrc
++    torrc=$(cat "$TMP/torrc")
++    assert_contains "$torrc" "ControlPort 172.0.1.0:7867"
++    assert_contains "$torrc" "HashedControlPassword 16:FAKEHASH"
++}
++
++test_control_port_default_port_and_ipv6() {
++    run_onions TOR_CONTROL_PORT=172.16.111.10 -- --setup-hosts || fail "setup failed"
++    assert_contains "$(cat "$TMP/torrc")" "ControlPort 172.16.111.10:9051"
++    run_onions 'TOR_CONTROL_PORT=[::1]:9999' -- --setup-hosts || fail "setup failed"
++    assert_contains "$(cat "$TMP/torrc")" "ControlPort [::1]:9999"
++}
++
++test_control_port_unix() {
++    run_onions TOR_CONTROL_PORT=unix:/path/to.socket -- --setup-hosts || fail "setup failed"
++    assert_contains "$(cat "$TMP/torrc")" "ControlPort unix:/path/to.socket"
++}
++
++test_control_port_invalid_fails() {
++    if run_onions TOR_CONTROL_PORT=not-an-ip:9051 -- --setup-hosts 2>/dev/null; then
++        fail "setup should fail"
++    fi
++    [[ ! -e $TMP/torrc ]] || fail "torrc should not be written"
++}
++
++test_socks_and_exit_relay() {
++    run_onions TOR_SOCKS_PORT=0.0.0.0:9050 TOR_EXIT_RELAY=true -- --setup-hosts || fail "setup failed"
++    local torrc
++    torrc=$(cat "$TMP/torrc")
++    assert_contains "$torrc" "SocksPort 0.0.0.0:9050"
++    assert_contains "$torrc" "ExitRelay 1"
++}
++
++test_not_valid_share_port() {
++    local out
++    out=$(run_onions SERVICE1_SERVICE_NAME=group1 SERVICE2_SERVICE_NAME=group1 \
++        SERVICE3_SERVICE_NAME=group2 SERVICE1_PORTS=80:80 SERVICE2_PORTS=80:80,82:8000 \
++        SERVICE3_PORTS=80:unix://unix.socket -- --setup-hosts 2>&1)
++    grep -q "Same port for multiple services in group1 group" <<<"$out" || fail "no error: $out"
++    assert_not_contains "$(cat "$TMP/torrc")" "hs/group1"
++    assert_contains "$(cat "$TMP/torrc")" "HiddenServiceDir $TMP/hs/group2"
++}
++
++test_not_valid_no_ports() {
++    local out
++    out=$(run_onions SERVICE1_SERVICE_NAME=group1 -- --setup-hosts 2>&1)
++    grep -q "Service service1 has not ports set" <<<"$out" || fail "no error: $out"
++    assert_not_contains "$(cat "$TMP/torrc")" "HiddenServiceDir"
++}
++
++test_socket_with_other_services() {
++    local out
++    out=$(run_onions 'G_TOR_SERVICE_HOSTS=80:unix:/s.sock,81:web:80' -- --setup-hosts 2>&1)
++    grep -q "Cannot use socket and ports" <<<"$out" || fail "no error: $out"
++}
++
++test_unsupported_version() {
++    local out
++    out=$(run_onions G_TOR_SERVICE_VERSION=2 -- --setup-hosts 2>&1)
++    grep -q "Url version 2 is not supported" <<<"$out" || fail "no error: $out"
++}
++
++test_output_and_json() {
++    run_onions SERVICE1_SERVICE_NAME=group1 SERVICE2_SERVICE_NAME=group1 \
++        SERVICE3_SERVICE_NAME=group2 SERVICE1_PORTS=80:80 SERVICE2_PORTS=81:80,82:8000 \
++        SERVICE3_PORTS=80:unix://unix.socket -- --setup-hosts || fail "setup failed"
++    echo "$ONION_V3" >"$TMP/hs/group1/hostname"
++    echo "group2onion.onion" >"$TMP/hs/group2/hostname"
++
++    local out
++    out=$(run_onions -- 2>&1)
++    assert_contains "$out" "group1: $ONION_V3:80, $ONION_V3:81, $ONION_V3:82"
++    assert_contains "$out" "group2: group2onion.onion:80"
++
++    out=$(run_onions -- --json)
++    assert_eq "$out" "{\"group1\": [\"$ONION_V3:80\", \"$ONION_V3:81\", \"$ONION_V3:82\"], \"group2\": [\"group2onion.onion:80\"]}"
++}
++
++test_output_before_tor_started() {
++    run_onions A_TOR_SERVICE_HOSTS=80:a:80 -- --setup-hosts || fail "setup failed"
++    assert_contains "$(run_onions --)" "a: onion address not generated yet (is tor running?)"
++    assert_eq "$(run_onions -- --json)" '{"a": []}'
++}
++
++test_no_onion_site() {
++    assert_eq "$(run_onions --)" "No onion site"
++    assert_eq "$(run_onions -- --json)" "{}"
++}
++
++for t in $(declare -F | awk '$3 ~ /^test_/ { print $3 }'); do
++    run_test "$t"
++done
++
++printf '\n%d tests, %d failures\n' "$tests" "$failures"
++((failures == 0))
+diff --git a/tox.ini b/tox.ini
+deleted file mode 100644
+index 38f7641..0000000
+--- a/tox.ini
++++ /dev/null
+@@ -1,9 +0,0 @@
+-[tox]
+-isolated_build = true
+-envlist = py310
+-
+-[testenv]
+-whitelist_externals = poetry
+-commands =
+-    poetry install -v
+-    poetry run pytest tests/

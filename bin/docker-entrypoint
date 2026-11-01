@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Container entrypoint: configure onion services from the environment, then
+# run tor as the unprivileged tor user. Any other command is run unchanged.
+set -euo pipefail
+
+TORRC=${ONIONS_TORRC:-/etc/tor/torrc}
+TOR_USER=${TOR_USER:-tor}
+
+log() { printf 'entrypoint: %s\n' "$*" >&2; }
+
+[[ $# -eq 0 ]] && set -- tor
+
+if [[ $1 != tor ]]; then
+    exec "$@"
+fi
+
+onions --setup-hosts
+
+mkdir -p /run/tor
+if [[ $(id -u) -eq 0 ]]; then
+    chmod -R 700 "$HOME" /run/tor
+    chown -R "$TOR_USER:$TOR_USER" "$HOME" /run/tor
+fi
+
+# Keep keys, service mappings and passwords out of tor's environment
+for var in $(compgen -e); do
+    case $var in
+        *_KEY | *_PORTS | *_SERVICE_NAME | *_TOR_SERVICE_* | TOR_SOCKS_PORT | TOR_CONTROL_PASSWORD)
+            unset "$var"
+            ;;
+    esac
+done
+
+# tor keeps this shell's pid once exec'd below
+tor_pid=$$
+
+# Display onion addresses once tor has written the hostname files
+(
+    mapfile -t hostnames < <(awk '$1 == "HiddenServiceDir" { print $2 "/hostname" }' "$TORRC")
+    for _ in $(seq 120); do
+        ready=1
+        for f in "${hostnames[@]}"; do
+            [[ -s $f ]] || ready=0
+        done
+        if ((ready)); then
+            onions
+            exit 0
+        fi
+        sleep 1
+    done
+    log "onion addresses not available after 120s, run 'onions' later"
+) &
+
+# Reload tor configuration (SIGHUP) when torrc changes
+if [[ -z ${ENTRYPOINT_DISABLE_RELOAD:-} ]] && command -v inotifyd >/dev/null; then
+    (
+        inotifyd - "$(dirname "$TORRC"):wy" | while IFS=$'\t' read -r _ _ name; do
+            if [[ $name == "$(basename "$TORRC")" ]]; then
+                log "$TORRC changed, reloading tor"
+                kill -HUP "$tor_pid" 2>/dev/null || true
+            fi
+        done
+    ) &
+fi
+
+if [[ $(id -u) -eq 0 ]]; then
+    exec su-exec "$TOR_USER:$TOR_USER" "$@"
+fi
+exec "$@"
